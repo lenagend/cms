@@ -1,0 +1,10 @@
+cms:
+  security:
+    rate-limit:
+      mode: REDIS  # 테스트 시 강제로 REDIS 모드 활성화
+      capacity: 100
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
