@@ -1,9 +1,12 @@
+spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
 cms:
   security:
     rate-limit:
       enabled: true
-      mode: local
+      mode: LOCAL
       capacity: 100
-      server-count: 1
-      redis-host: localhost
-      redis-port: 6379
