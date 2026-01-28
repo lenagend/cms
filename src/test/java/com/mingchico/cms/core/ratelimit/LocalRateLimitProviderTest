@@ -1,0 +1,58 @@
+package com.mingchico.cms.core.ratelimit;
+
+import io.github.bucket4j.ConsumptionProbe;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * [LocalRateLimitProvider 단위 테스트]
+ * 외부 의존성(Redis 등) 없이 순수하게 로컬 메모리상에서
+ * 토큰 버킷 알고리즘이 정상 작동하는지 검증합니다.
+ */
+class LocalRateLimitProviderTest {
+
+    @Test
+    @DisplayName("정상 동작: 설정된 용량만큼 요청이 허용되어야 한다")
+    void allowRequestWithinCapacity() {
+        // given
+        RateLimitProperties properties = new RateLimitProperties();
+        properties.setCapacity(10); // 1분에 10회 허용
+        properties.setMode("LOCAL");
+
+        LocalRateLimitProvider provider = new LocalRateLimitProvider(properties);
+        // @PostConstruct가 테스트에서는 자동 실행되지 않으므로 수동 호출
+        provider.init();
+
+        // when
+        ConsumptionProbe probe = provider.tryConsume("127.0.0.1");
+
+        // then
+        assertThat(probe.isConsumed()).isTrue(); // 토큰 소모 성공
+        assertThat(probe.getRemainingTokens()).isEqualTo(9); // 10 - 1 = 9
+    }
+
+    @Test
+    @DisplayName("차단 동작: 허용량을 초과하면 요청이 거부되어야 한다")
+    void rejectRequestExceedingCapacity() {
+        // given
+        RateLimitProperties properties = new RateLimitProperties();
+        properties.setCapacity(1); // 1분에 1회만 허용 (테스트를 위해 극단적 설정)
+        properties.setMode("LOCAL");
+
+        LocalRateLimitProvider provider = new LocalRateLimitProvider(properties);
+        provider.init();
+
+        // when
+        // 첫 번째 요청: 성공
+        provider.tryConsume("127.0.0.1");
+        // 두 번째 요청: 실패해야 함
+        ConsumptionProbe probe = provider.tryConsume("127.0.0.1");
+
+        // then
+        assertThat(probe.isConsumed()).isFalse(); // 토큰 소모 실패
+        assertThat(probe.getRemainingTokens()).isZero(); // 남은 토큰 0
+    }
+}
