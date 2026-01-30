@@ -1,0 +1,61 @@
+spring:
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  # JPA 설정 추가 (DDL 자동 생성을 위해 필수)
+  jpa:
+    hibernate:
+      ddl-auto: update # 개발 단계: update, 운영: validate 권장
+    show-sql: true
+
+cms:
+  async:
+    thread-name-prefix: "cms-vt-"
+
+  # [보안 통합 설정]
+  security:
+
+    # 1. 자동 로그인 (SecurityProperties 매핑)
+    remember-me:
+      key: "mingchico-cms-secret-key-must-change" #프로덕션에서는 커스텀
+      validity-seconds: 1209600 # 14일
+
+    # 2. XSS 방어 (XssProperties 매핑)
+    # 기존 'spring.security.xss' -> 'cms.security.xss'로 이동하여 통일성 확보
+    xss:
+      enabled: true
+      rules:
+        - path-pattern: "/admin/board/**"
+          allow-parameters: [ "content" ]
+        - path-pattern: "/admin/contents/**"
+          allow-parameters: [ "content", "body" ]
+
+    # 3. Rate Limit (RateLimitProperties 매핑)
+    rate-limit:
+      enabled: true
+      mode: LOCAL
+      capacity: 100
+      trusted-proxies:
+        - "127.0.0.1"
+        - "0:0:0:0:0:0:0:1"
+      excluded-paths:
+        - "/actuator"
+        - "/health"
+        - "/metrics"
+      excluded-extensions:
+        - ".css"
+        - ".js"
+        - ".png"
+        - ".jpg"
+        - ".jpeg"
+        - ".gif"
+        - ".ico"
+        - ".svg"
+        - ".woff"
+        - ".woff2"
+        - ".ttf"
+        - ".webp"
