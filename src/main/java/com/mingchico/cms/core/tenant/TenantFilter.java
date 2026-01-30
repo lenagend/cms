@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -33,12 +34,26 @@ public class TenantFilter extends OncePerRequestFilter {
 
     private final TenantResolver tenantResolver;
     private static final String MDC_SITE_KEY = "siteCode";
+    private final TenantProperties tenantProperties;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher(); // 패턴 매칭 유틸리티
 
+    /**
+     * [필터 제외 로직]
+     * yml에 설정된 'excluded-paths'에 포함된 경로는
+     * 테넌트 식별 과정을 건너뛰고 다음 필터로 통과시킵니다.
+     */
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
         String path = request.getRequestURI();
-        // 관리자 API 경로는 테넌트 식별 없이 통과 (SecurityConfig에서 이미 권한 제어를 하므로 안전함)
-        return path.startsWith("/api/admin");
+
+        // 1. 프로퍼티에 정의된 제외 경로 확인
+        for (String pattern : tenantProperties.getExcludedPaths()) {
+            if (pathMatcher.match(pattern, path)) {
+                return true; // 필터 실행 안 함 (skip)
+            }
+        }
+
+        return false; // 필터 실행
     }
 
     @Override

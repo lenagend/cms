@@ -59,3 +59,12 @@ cms:
         - ".woff2"
         - ".ttf"
         - ".webp"
+        -
+    tenant:
+      excluded-paths:
+        - "/favicon.ico"        # 파비콘
+        - "/error"              # 에러 페이지
+        - "/static/**"          # 정적 리소스 (css, js 등)
+        - "/actuator/**"        # 헬스 체크 및 메트릭
+        - "/api/admin/**"       # 관리자 API는 테넌트 무관
+        - "/h2-console/**"      # H2 콘솔 (테스트용)
