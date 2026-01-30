@@ -1,6 +1,6 @@
 package com.mingchico.cms.core.tenant.dto;
 
-import com.mingchico.cms.core.tenant.domain.TenantMapping;
+import com.mingchico.cms.core.tenant.domain.Tenant;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
@@ -21,6 +21,9 @@ public class TenantDto {
             @Pattern(regexp = "^[A-Z0-9_]+$", message = "사이트 코드는 대문자와 언더바(_)만 가능합니다.")
             String siteCode,
 
+            @NotBlank(message = "사이트 이름은 필수입니다.")
+            String name,
+
             String description
     ) {}
 
@@ -29,8 +32,8 @@ public class TenantDto {
      * 도메인 패턴은 PK 개념에 가까우므로 수정 불가, 사이트 코드와 설명만 수정 가능하도록 설계
      */
     public record UpdateRequest(
-            @NotBlank(message = "사이트 코드는 필수입니다.")
-            String siteCode,
+            @NotBlank(message = "사이트 이름은 필수입니다.")
+            String name, // [추가] 엔티티의 name 필드 충족을 위해 추가
 
             String description
     ) {}
@@ -42,6 +45,7 @@ public class TenantDto {
             Long id,
             String domainPattern,
             String siteCode,
+            String name,
             String description,
             String createdBy,
             String createdAt,
@@ -49,11 +53,12 @@ public class TenantDto {
             String updatedAt
     ) {
         // 엔티티 -> DTO 변환을 위한 정적 팩토리 메서드
-        public static Response from(TenantMapping entity) {
+        public static Response from(Tenant entity) {
             return new Response(
                     entity.getId(),
                     entity.getDomainPattern(),
                     entity.getSiteCode(),
+                    entity.getName(),
                     entity.getDescription(),
                     entity.getCreatedBy(),
                     entity.getCreatedAt().toString(),

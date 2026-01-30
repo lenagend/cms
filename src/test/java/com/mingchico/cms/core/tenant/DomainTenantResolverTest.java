@@ -1,8 +1,8 @@
 package com.mingchico.cms.core.tenant;
 
 import com.mingchico.cms.core.tenant.TenantResolver.UnknownTenantException;
-import com.mingchico.cms.core.tenant.domain.TenantMapping;
-import com.mingchico.cms.core.tenant.repository.TenantMappingRepository;
+import com.mingchico.cms.core.tenant.domain.Tenant;
+import com.mingchico.cms.core.tenant.repository.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,16 +25,16 @@ class DomainTenantResolverTest {
     private DomainTenantResolver tenantResolver;
 
     @Mock
-    private TenantMappingRepository tenantMappingRepository;
+    private TenantRepository tenantRepository;
 
     @BeforeEach
     void setUp() {
         // [Given] 테스트용 DB 데이터 모킹
         // DB에 이런 규칙들이 있다고 가정하고 메모리에 로드
-        given(tenantMappingRepository.findAllByOrderByDomainPatternDesc()).willReturn(List.of(
-                TenantMapping.builder().domainPattern("mingchico.com").siteCode("SITE_MAIN").build(),
-                TenantMapping.builder().domainPattern("*.mingchico.com").siteCode("SITE_SUB").build(),
-                TenantMapping.builder().domainPattern("admin.mingchico.com").siteCode("SITE_ADMIN").build()
+        given(tenantRepository.findAllByOrderByDomainPatternDesc()).willReturn(List.of(
+                Tenant.builder().domainPattern("mingchico.com").siteCode("SITE_MAIN").build(),
+                Tenant.builder().domainPattern("*.mingchico.com").siteCode("SITE_SUB").build(),
+                Tenant.builder().domainPattern("admin.mingchico.com").siteCode("SITE_ADMIN").build()
         ));
 
         // @PostConstruct가 Mockito 환경에서는 자동 실행 안 되므로 수동 호출

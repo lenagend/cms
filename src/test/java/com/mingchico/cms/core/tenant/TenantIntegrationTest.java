@@ -1,13 +1,12 @@
 package com.mingchico.cms.core.tenant;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mingchico.cms.core.tenant.domain.TenantMapping;
+import com.mingchico.cms.core.tenant.domain.Tenant;
 import com.mingchico.cms.core.tenant.dto.TenantDto;
-import com.mingchico.cms.core.tenant.repository.TenantMappingRepository;
+import com.mingchico.cms.core.tenant.repository.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,8 +14,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -39,7 +36,7 @@ class TenantIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
-    private TenantMappingRepository repository;
+    private TenantRepository tenantRepository;
 
     @Autowired
     private DomainTenantResolver domainTenantResolver;
@@ -49,11 +46,12 @@ class TenantIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        repository.deleteAll();
-        // [중요] 관리자 기능을 수행하기 위해 'localhost' 테넌트를 미리 등록해둡니다.
-        repository.save(TenantMapping.builder()
+        tenantRepository.deleteAll();
+        // [수정] 빌더에 name() 필드를 추가하여 NOT NULL 제약을 충족시킵니다.
+        tenantRepository.save(Tenant.builder()
                 .domainPattern("localhost")
                 .siteCode("SYSTEM_ADMIN")
+                .name("시스템 관리자")
                 .description("시스템 관리용")
                 .build());
 
@@ -62,13 +60,14 @@ class TenantIntegrationTest {
 
     @Test
     @DisplayName("신규 테넌트 등록부터 도메인 접속 식별까지의 전체 흐름 테스트")
-    @WithMockUser(username = "admin_user", roles = "ADMIN")
+    @WithMockUser(username = "admin@system.com", roles = "ADMIN")
     void tenant_full_flow_test() throws Exception {
         // 1. [등록] 관리자가 새로운 테넌트(domain-a.com)를 등록함
         TenantDto.CreateRequest createRequest = new TenantDto.CreateRequest(
                 "domain-a.com",
                 "SITE_A",
-                "A사 공식 사이트"
+                "A사 공식 사이트",
+                "설명"
         );
 
         mockMvc.perform(post("/api/admin/tenants")
@@ -76,10 +75,9 @@ class TenantIntegrationTest {
                         .content(objectMapper.writeValueAsString(createRequest)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.siteCode").value("SITE_A"))
-                .andExpect(jsonPath("$.createdBy").value("admin_user")); // Auditing 확인
-
+                .andExpect(jsonPath("$.createdBy").value("admin@system.com"));
         // DB에 실제로 잘 저장되었는지 확인
-        assertThat(repository.existsByDomainPattern("domain-a.com")).isTrue();
+        assertThat(tenantRepository.existsByDomainPattern("domain-a.com")).isTrue();
 
         // 2. [식별] 등록된 도메인으로 접속했을 때 시스템이 SITE_A로 인식하는지 확인
         // 이 과정에서 TenantFilter -> TenantResolver -> DB 조회 -> TenantContext 주입이 일어남
@@ -94,10 +92,10 @@ class TenantIntegrationTest {
 
     @Test
     @DisplayName("와일드카드 도메인 등록 후 일반 API 접속 시 테넌트 식별 검증")
-    @WithMockUser(username = "admin", roles = "ADMIN")
+    @WithMockUser(username = "admin@system.com", roles = "ADMIN")
     void wildcard_identification_success() throws Exception {
         // 1. 테넌트 등록
-        TenantDto.CreateRequest request = new TenantDto.CreateRequest("*.mingchico.com", "SITE_WC", "와일드카드");
+        TenantDto.CreateRequest request = new TenantDto.CreateRequest("*.mingchico.com", "SITE_WC", "테스트사이트","와일드카드");
         mockMvc.perform(post("/api/admin/tenants")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
@@ -123,26 +121,32 @@ class TenantIntegrationTest {
     }
 
     @Test
-    @DisplayName("테넌트 정보 수정 및 캐시 즉시 반영 테스트")
-    @WithMockUser(username = "admin", roles = "ADMIN")
+    @DisplayName("테넌트 관리 정보(이름/설명) 수정 및 캐시 반영 테스트")
+    @WithMockUser(username = "admin@system.com", roles = "ADMIN")
     void update_tenant_and_cache_refresh_test() throws Exception {
         // 1. 기존 테넌트 생성
-        TenantMapping saved = repository.save(TenantMapping.builder()
+        Tenant saved = tenantRepository.save(Tenant.builder()
                 .domainPattern("update.com")
-                .siteCode("BEFORE")
+                .siteCode("BEFORE") // 사이트 코드는 고정
+                .name("수정전 사이트명")
                 .build());
 
-        // 2. 사이트 코드 수정 요청 (BEFORE -> AFTER)
-        TenantDto.UpdateRequest updateRequest = new TenantDto.UpdateRequest("AFTER", "설명 수정");
+        // 2. 수정 요청 (이름과 설명만 수정)
+        TenantDto.UpdateRequest updateRequest = new TenantDto.UpdateRequest(
+                "새이름",
+                "설명수정"
+        );
 
         mockMvc.perform(put("/api/admin/tenants/" + saved.getId())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(updateRequest)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.siteCode").value("AFTER"));
+                // [수정] 사이트 코드는 바뀌지 않았음을 검증 (BEFORE 유지)
+                .andExpect(jsonPath("$.siteCode").value("BEFORE"))
+                // [수정] 이름이 정상적으로 변경되었는지 검증
+                .andExpect(jsonPath("$.name").value("새이름"));
 
-        // 3. 수정 후 즉시 해당 도메인으로 접속했을 때 AFTER로 인식되는지 확인
-        // 서비스 계층에서 domainTenantResolver.refreshRules()를 호출하므로 즉시 반영되어야 함
+        // 3. 캐시 반영 확인
         mockMvc.perform(get("/api/admin/tenants")
                         .header("Host", "update.com"))
                 .andExpect(status().isOk());

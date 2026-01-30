@@ -2,8 +2,8 @@ package com.mingchico.cms.core.tenant;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.mingchico.cms.core.tenant.domain.TenantMapping;
-import com.mingchico.cms.core.tenant.repository.TenantMappingRepository;
+import com.mingchico.cms.core.tenant.domain.Tenant;
+import com.mingchico.cms.core.tenant.repository.TenantRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class DomainTenantResolver implements TenantResolver {
 
-    private final TenantMappingRepository repository;
+    private final TenantRepository tenantRepository;
     private final AntPathMatcher pathMatcher = new AntPathMatcher(".");
 
     // [1] Rule Cache: DB의 모든 규칙을 들고 있는 메모리 저장소
@@ -61,12 +61,12 @@ public class DomainTenantResolver implements TenantResolver {
     public void refreshRules() {
         try {
             log.debug("Refreshing Tenant Rules from DB...");
-            List<TenantMapping> mappings = repository.findAllByOrderByDomainPatternDesc();
+            List<Tenant> mappings = tenantRepository.findAllByOrderByDomainPatternDesc();
 
             // 기존 규칙과 비교하여 변경이 있을 때만 로그 남기거나 교체 가능하지만,
             // 여기서는 단순함을 위해 전체 갱신 (Map putAll은 비용이 낮음)
             cachedRules.clear();
-            for (TenantMapping mapping : mappings) {
+            for (Tenant mapping : mappings) {
                 cachedRules.put(mapping.getDomainPattern(), mapping.getSiteCode());
             }
 
