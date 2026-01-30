@@ -1,14 +1,13 @@
 package com.mingchico.cms.core.ratelimit;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.bucket4j.ConsumptionProbe;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.anyString;
@@ -32,10 +31,11 @@ class GlobalRateLimitFilterTest {
 
     // 실제 Provider 대신 가짜(Mock) 객체를 주입받아 동작을 정의합니다.
     // 이렇게 하면 Redis나 Local 설정과 무관하게 필터 로직만 테스트 가능합니다.
-    @MockBean
+    @MockitoBean
     private RateLimitProvider rateLimitProvider;
 
     @Test
+    @WithMockUser
     @DisplayName("정상 요청: Rate Limit 내의 요청은 통과하고 헤더가 붙어야 한다")
     void allowNormalRequest() throws Exception {
         // given
@@ -74,6 +74,7 @@ class GlobalRateLimitFilterTest {
     }
 
     @Test
+    @WithMockUser
     @DisplayName("예외 처리: 정적 리소스(이미지 등)는 Rate Limit 검사를 건너뛰어야 한다")
     void skipStaticResources() throws Exception {
         // when
@@ -86,14 +87,15 @@ class GlobalRateLimitFilterTest {
     }
 
     @Test
+    @WithMockUser
     @DisplayName("예외 처리: CORS Preflight(OPTIONS) 요청은 검사를 건너뛰어야 한다")
     void skipCorsPreflight() throws Exception {
         // when
-        mockMvc.perform(options("/api/test")) // OPTIONS 메소드 요청
-                .andExpect(status().isOk()); // 보통 Spring 기본 설정에서 OPTIONS는 통과됨
+        mockMvc.perform(options("/api/test"))
+                .andExpect(status().isNotFound());
 
         // then
-        // Provider의 tryConsume이 호출되지 않았어야 함
+        // 필터에서 skip되었으므로 Provider는 호출되지 않아야 함
         verify(rateLimitProvider, never()).tryConsume(anyString());
     }
 }

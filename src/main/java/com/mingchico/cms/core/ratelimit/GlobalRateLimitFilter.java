@@ -1,161 +1,198 @@
 package com.mingchico.cms.core.ratelimit;
 
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.bucket4j.ConsumptionProbe;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.lang.NonNull;
+import org.springframework.security.web.util.matcher.IpAddressMatcher;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * [글로벌 Rate Limit 필터]
- * 시스템으로 들어오는 모든 HTTP 요청을 가로채어 트래픽 양을 제어합니다.
+ * <p>
+ * 시스템으로 들어오는 모든 HTTP 요청을 가장 먼저 가로채어 트래픽 양을 제어하는 문지기(Gatekeeper) 역할을 합니다.
+ * Spring Security보다 앞단에서 동작하여 악성 트래픽이 서버 리소스를 점유하기 전에 차단합니다.
+ * </p>
  *
- * <p>주요 특징:</p>
+ * <h3>핵심 기능</h3>
  * <ul>
- * <li><b>최우선 순위 실행:</b> Spring Security보다 먼저 실행되어 악성 트래픽이 인증 로직(DB 조회 등)을 태우기도 전에 차단합니다.</li>
- * <li><b>Fail-Open 정책:</b> Rate Limit 시스템(Redis 등)에 장애가 발생하면 차단하지 않고 통과시켜 서비스 가용성을 보장합니다.</li>
- * <li><b>지능적 필터링:</b> 정적 리소스나 CORS 사전 요청(OPTIONS)은 제한 대상에서 제외하여 불필요한 카운팅을 막습니다.</li>
+ * <li><b>최우선 순위 방어:</b> 인증/인가 로직이 돌기도 전에 실행되어 DDoS 공격 등으로부터 DB와 애플리케이션을 보호합니다.</li>
+ * <li><b>IP 스푸핑 방지:</b> 헤더 조작을 통한 우회 공격을 막기 위해 신뢰할 수 있는 프록시(L4, Cloudflare 등)만 검증합니다.</li>
+ * <li><b>Fail-Open 정책:</b> Rate Limit 시스템(Redis 등)에 장애가 나면, 사용자 요청을 차단하는 대신 통과시켜 서비스 가용성을 최우선으로 합니다.</li>
  * </ul>
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
-// [순서 설정: HIGHEST_PRECEDENCE]
-// 가장 높은 우선순위(Integer.MIN_VALUE)를 가집니다.
-// 장점: DDoS성 공격이 들어올 때 비즈니스 로직이나 DB 커넥션을 점유하기 전에 즉시 쳐낼 수 있습니다.
-@Order(Ordered.HIGHEST_PRECEDENCE)
-// 설정 파일에서 cms.security.rate-limit.enabled=true 일 때만 활성화 (기본값 true)
+// [순서 설정: 최우선]
+// Integer.MIN_VALUE로 설정되어 모든 필터 중 가장 먼저 실행됩니다.
+// 하지만 MDC LOGGING이 더 먼저실행돼야합니다 +1
+@Order(Ordered.HIGHEST_PRECEDENCE + 3)
+// 설정 파일(application.yml)에서 'cms.security.rate-limit.enabled=true'일 때만 활성화됩니다.
 @ConditionalOnProperty(name = "cms.security.rate-limit.enabled", havingValue = "true", matchIfMissing = true)
 public class GlobalRateLimitFilter extends OncePerRequestFilter {
 
     private final RateLimitProvider rateLimitProvider;
-    private final JsonMapper jsonMapper;
+    private final RateLimitProperties properties;
+    private final ObjectMapper objectMapper;
 
     /**
-     * 신뢰할 수 있는 IP 헤더 목록 (우선순위 순)
-     * 클라우드(AWS ALB, Cloudflare)나 L4 스위치 등을 거칠 때 원본 IP가 담기는 헤더들입니다.
+     * [신뢰할 수 있는 IP 매처 목록]
+     * 매 요청마다 CIDR(예: 192.168.0.0/16)을 파싱하면 성능이 떨어지므로,
+     * 필터 생성 시점에 미리 컴파일(Compile)하여 메모리에 올려둡니다.
+     */
+    private final List<IpAddressMatcher> trustedIpMatchers;
+
+    /**
+     * [클라이언트 IP 헤더 목록]
+     * 프록시나 로드밸런서를 거쳐 들어온 요청의 원본 IP가 담기는 헤더들입니다.
      */
     private static final String[] IP_HEADERS = {
-            "X-Forwarded-For",
-            "Proxy-Client-IP",
-            "WL-Proxy-Client-IP",
-            "HTTP_CLIENT_IP",
-            "HTTP_X_FORWARDED_FOR"
+            "X-Forwarded-For", "Proxy-Client-IP", "WL-Proxy-Client-IP",
+            "HTTP_CLIENT_IP", "HTTP_X_FORWARDED_FOR"
     };
 
-    /**
-     * Rate Limit 제외 대상 확장자 목록 (정적 리소스)
-     * 이 파일들은 서버 부하가 적으므로 굳이 트래픽 제한을 걸어 사용자 경험을 해칠 필요가 없습니다.
-     */
-    private static final Set<String> STATIC_EXTENSIONS = Set.of(
-            ".css", ".js", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf"
-    );
+    public GlobalRateLimitFilter(RateLimitProvider rateLimitProvider,
+                                 RateLimitProperties properties,
+                                 ObjectMapper objectMapper) {
+        this.rateLimitProvider = rateLimitProvider;
+        this.properties = properties;
+        this.objectMapper = objectMapper;
 
+        // properties에서 문자열로 된 IP 목록을 가져와서, 검증 가능한 Matcher 객체로 변환합니다.
+        // 예: "127.0.0.1" -> IpAddressMatcher 객체
+        this.trustedIpMatchers = properties.getTrustedProxies().stream()
+                .map(IpAddressMatcher::new)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * [필터 로직 수행]
+     * 실제 요청이 들어왔을 때 실행되는 메인 메서드입니다.
+     *
+     * @param request     HTTP 요청 객체 (NonNull: 절대 null이 아님을 보장)
+     * @param response    HTTP 응답 객체 (NonNull)
+     * @param filterChain 다음 필터로 넘겨주는 체인 (NonNull)
+     */
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+    protected void doFilterInternal(@NonNull HttpServletRequest request,
+                                    @NonNull HttpServletResponse response,
+                                    @NonNull FilterChain filterChain)
             throws ServletException, IOException {
 
-        // [1. 필터링 제외 대상 확인]
-        // Rate Limit을 적용하면 안 되는 요청(CORS, 정적 파일 등)은 즉시 통과시킵니다.
+        // 1. 제외 대상(정적 파일 등)인지 확인하고, 맞으면 즉시 통과
         if (shouldSkipRateLimit(request)) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // [2. 클라이언트 IP 추출]
-        // 다양한 프록시 환경을 고려하여 최대한 정확한 실제 IP를 찾아냅니다.
+        // 2. 클라이언트의 실제 IP 추출 (보안 로직 포함)
         String clientIp = resolveClientIp(request);
+        String rateLimitKey = clientIp + ":" + request.getRequestURI();
 
         try {
-            // [3. 토큰 소모 시도 (핵심 로직)]
-            ConsumptionProbe probe = rateLimitProvider.tryConsume(clientIp);
+            // 3. 토큰 소모 시도 (핵심)
+            ConsumptionProbe probe = rateLimitProvider.tryConsume(rateLimitKey);
 
             if (probe.isConsumed()) {
-                // [성공 - 통과]
-                // 클라이언트에게 "앞으로 몇 번 더 요청할 수 있는지" 친절하게 알려줍니다.
+                // [성공] 토큰이 남아있음 -> 통과
+                // 클라이언트에게 "앞으로 X번 더 요청 가능" 정보를 헤더로 알려줍니다 (친절한 API).
                 response.addHeader("X-Rate-Limit-Remaining", String.valueOf(probe.getRemainingTokens()));
                 filterChain.doFilter(request, response);
             } else {
-                // [실패 - 차단]
-                // 허용량을 초과했습니다. 429 에러를 반환합니다.
-                long waitForRefillSeconds = probe.getNanosToWaitForRefill() / 1_000_000_000;
-                log.warn("Rate Limit Exceeded for IP: {} (Wait: {}s)", clientIp, waitForRefillSeconds);
+                // [실패] 토큰 부족 -> 429 에러 반환 (차단)
+                long waitForRefillSeconds = Math.max(
+                        1,
+                        probe.getNanosToWaitForRefill() / 1_000_000_000
+                );
+                log.debug("Rate Limit Exceeded: {}", clientIp);
                 handleRateLimitExceeded(response, waitForRefillSeconds);
             }
         } catch (Exception e) {
-            // [4. Fail-Open (장애 격리)]
-            // Redis 연결 실패 등 Rate Limit 내부 오류가 발생해도,
-            // 실제 비즈니스 서비스는 중단되지 않고 돌아가야 합니다. (보안 < 가용성)
+            // [Fail-Open 정책]
+            // Redis가 죽거나 연결이 끊겨서 에러가 나더라도, 고객의 비즈니스 요청을 막으면 안 됩니다.
+            // 보안보다는 '서비스 가용성'을 선택하여 에러 로그만 남기고 요청을 통과시킵니다.
             log.error("Rate Limit System Error (Bypassing for IP: {}): {}", clientIp, e.getMessage());
             filterChain.doFilter(request, response);
         }
     }
 
     /**
-     * [제외 조건 판단 로직]
+     * [제외 조건 판단]
      * Rate Limit 카운팅을 하지 말아야 할 요청인지 검사합니다.
+     * - OPTIONS 요청: 브라우저의 CORS 사전 검사 (안전함)
+     * - 정적 리소스: 이미지, CSS 등 (서버 부하가 적음)
      */
     private boolean shouldSkipRateLimit(HttpServletRequest request) {
-        // 1. CORS Preflight 요청 (OPTIONS)
-        // 브라우저가 실제 요청을 보내기 전에 안전한지 찔러보는 요청입니다. 차단하면 프론트엔드 에러가 납니다.
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-
-        // 2. 정적 리소스 (Static Resources)
-        // 이미지나 스크립트 파일 요청까지 카운팅하면 페이지 하나 로딩에 수십 개 토큰이 소모될 수 있습니다.
         String path = request.getRequestURI().toLowerCase();
-        // 확장자로 끝나는지 확인 (예: /assets/logo.png)
-        return STATIC_EXTENSIONS.stream().anyMatch(path::endsWith);
+
+        if (properties.getExcludedPaths().stream().anyMatch(path::startsWith)) {
+            return true;
+        }
+
+        // 설정 파일(properties)에 정의된 확장자로 끝나는지 확인
+        return properties.getExcludedExtensions().stream().anyMatch(path::endsWith);
     }
 
     /**
-     * [방어적 IP 추출 로직]
-     * 프록시 헤더(X-Forwarded-For)를 파싱하여 원본 IP를 찾습니다.
-     * <p>
-     * 주의: X-Forwarded-For 헤더는 클라이언트가 조작할 수 있습니다.
-     * 완벽한 보안을 위해서는 앞단(Nginx, AWS ALB)에서 이 헤더를 강제로 덮어씌우는 설정이 병행되어야 합니다.
-     * </p>
+     * [보안 강화된 IP 추출 로직]
+     * "X-Forwarded-For" 헤더는 클라이언트가 마음대로 조작할 수 있어 위험합니다.
+     * 따라서 요청이 '신뢰할 수 있는 서버(로드밸런서 등)'에서 왔을 때만 해당 헤더를 믿습니다.
+     *
+     * @return 검증된 실제 클라이언트 IP
      */
     private String resolveClientIp(HttpServletRequest request) {
+        String remoteAddr = request.getRemoteAddr(); // 실제 TCP 연결 IP
+
+        // 1. 요청을 보낸 직전 서버(remoteAddr)가 우리 내부망/로드밸런서(Trusted Proxy)인지 확인
+        boolean isTrusted = trustedIpMatchers.stream()
+                .anyMatch(matcher -> matcher.matches(request));
+
+        // 2. 신뢰할 수 없는 소스(해커가 직접 요청 등)라면, 헤더는 조작되었을 가능성이 높으므로 무시
+        if (!isTrusted) {
+            return remoteAddr;
+        }
+
+        // 3. 신뢰할 수 있는 경로라면 X-Forwarded-For 등을 파싱하여 원본 IP 추출
         for (String header : IP_HEADERS) {
             String ip = request.getHeader(header);
             if (StringUtils.hasText(ip) && !"unknown".equalsIgnoreCase(ip)) {
-                // X-Forwarded-For 형식: "client_ip, proxy1_ip, proxy2_ip"
-                // 콤마(,)로 구분된 경우 맨 왼쪽(첫 번째) IP가 원본 클라이언트입니다.
+                // "client, proxy1, proxy2" 형식일 경우 맨 앞이 원본 클라이언트
                 if (ip.contains(",")) {
                     ip = ip.split(",")[0];
                 }
                 return ip.trim();
             }
         }
-        // 헤더가 없으면 실제 TCP 연결된 Remote IP를 반환합니다.
-        return request.getRemoteAddr();
+        return remoteAddr;
     }
 
     /**
-     * [차단 응답 처리]
-     * 429 Too Many Requests 상태 코드와 함께 JSON 포맷으로 에러 메시지를 반환합니다.
+     * [차단 응답 처리 (429 Too Many Requests)]
+     * 단순히 에러만 뱉는 게 아니라, JSON 포맷으로 "왜 차단됐는지", "언제 풀리는지" 친절하게 알려줍니다.
      */
     private void handleRateLimitExceeded(HttpServletResponse response, long waitForRefill) throws IOException {
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
-        // 표준 헤더: 언제 다시 시도하면 되는지 초 단위로 알려줌
+        // 표준 헤더: Retry-After (초 단위)
         response.setHeader("Retry-After", String.valueOf(waitForRefill));
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
@@ -166,6 +203,6 @@ public class GlobalRateLimitFilter extends OncePerRequestFilter {
         body.put("message", String.format("요청이 너무 많습니다. %d초 후에 다시 시도해주세요.", waitForRefill));
         body.put("wait_seconds", waitForRefill);
 
-        response.getWriter().write(jsonMapper.writeValueAsString(body));
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 }

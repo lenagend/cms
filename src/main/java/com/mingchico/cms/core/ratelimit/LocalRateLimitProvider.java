@@ -15,14 +15,23 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 
 /**
- * [로컬 기반 Rate Limit 구현체]
+ * <h3>[로컬 기반 Rate Limit 구현체]</h3>
+ * <p>
  * Caffeine Cache를 사용하여 서버 개별 메모리(Heap) 내에서 트래픽을 제어합니다.
+ * 외부 저장소와의 통신 없이 로컬에서 즉각적인 판별이 가능합니다.
+ * </p>
  *
- * 주요 특징:
- * - 고성능/저지연: 네트워크 통신(Redis 등)이 없으므로 응답 속도가 매우 빠릅니다.
- * - 메모리 관리: 최대 저장 용량(100,000개)과 유효 시간(1시간)을 설정하여 OOM(Out Of Memory) 장애를 방지합니다.
- * - 부드러운 리필: Greedy 알고리즘을 사용하여 토큰이 시간에 비례하여 일정하게 채워지도록 관리합니다.
+ * <h3>주요 특징</h3>
+ * <ul>
+ * <li><b>고성능/저지연:</b> 네트워크 통신(Redis 등) 비용이 발생하지 않아 응답 속도가 매우 빠릅니다.</li>
+ * <li><b>효율적인 메모리 관리:</b> {@code 100,000}개의 최대 저장 용량과 {@code 1시간}의 유효 시간을 설정하여
+ * OOM(Out Of Memory) 장애를 방지합니다.</li>
+ * <li><b>부드러운 리필(Refill):</b> Greedy 알고리즘을 사용하여 토큰이 시간에 비례하여 일정하게 채워지도록 관리합니다.</li>
+ * </ul>
+ *
+ * @see <a href="https://github.com/ben-manes/caffeine">Caffeine Cache Library</a>
  */
+
 @Slf4j
 @Service
 @RequiredArgsConstructor

@@ -20,7 +20,7 @@ class LocalRateLimitProviderTest {
         // given
         RateLimitProperties properties = new RateLimitProperties();
         properties.setCapacity(10); // 1분에 10회 허용
-        properties.setMode("LOCAL");
+        properties.setMode(RateLimitProperties.Mode.LOCAL);
 
         LocalRateLimitProvider provider = new LocalRateLimitProvider(properties);
         // @PostConstruct가 테스트에서는 자동 실행되지 않으므로 수동 호출
@@ -40,7 +40,7 @@ class LocalRateLimitProviderTest {
         // given
         RateLimitProperties properties = new RateLimitProperties();
         properties.setCapacity(1); // 1분에 1회만 허용 (테스트를 위해 극단적 설정)
-        properties.setMode("LOCAL");
+        properties.setMode(RateLimitProperties.Mode.LOCAL);
 
         LocalRateLimitProvider provider = new LocalRateLimitProvider(properties);
         provider.init();
