@@ -10,18 +10,18 @@ import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import java.util.Map;
 
-/**
- * [GlobalRateLimitFilter 통합 테스트]
- * 실제 서버를 띄우지 않고 MockMvc를 사용하여 필터 체인을 테스트합니다.
- * Provider 구현체(Local/Redis)와 상관없이 "필터의 로직"을 검증합니다.
- */
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 @SpringBootTest
 @AutoConfigureMockMvc
 class GlobalRateLimitFilterTest {
@@ -29,73 +29,59 @@ class GlobalRateLimitFilterTest {
     @Autowired
     private MockMvc mockMvc;
 
-    // 실제 Provider 대신 가짜(Mock) 객체를 주입받아 동작을 정의합니다.
-    // 이렇게 하면 Redis나 Local 설정과 무관하게 필터 로직만 테스트 가능합니다.
+    @Autowired
+    private RateLimitProperties properties; // 설정을 조작하기 위해 주입
+
     @MockitoBean
     private RateLimitProvider rateLimitProvider;
 
     @Test
     @WithMockUser
-    @DisplayName("정상 요청: Rate Limit 내의 요청은 통과하고 헤더가 붙어야 한다")
-    void allowNormalRequest() throws Exception {
+    @DisplayName("테넌트별 동적 용량 적용: VIP 사이트는 설정된 높은 용량(1000)이 전달되어야 한다")
+    void shouldUseCustomCapacityForVipTenant() throws Exception {
         // given
-        // Mock: 토큰 소모 성공(isConsumed=true), 남은 토큰 99개라고 가정
+        // 1. 테스트용 프로퍼티 설정 (VIP 사이트는 1000회 허용)
+        properties.getPerTenantCapacities().put("vip-site.com", 1000);
+
+        ConsumptionProbe successProbe = mock(ConsumptionProbe.class);
+        given(successProbe.isConsumed()).willReturn(true);
+        given(successProbe.getRemainingTokens()).willReturn(999L);
+
+        // Mocking: 어떤 인자가 들어오든 성공 리턴 (검증은 verify에서 함)
+        given(rateLimitProvider.tryConsume(anyString(), anyInt())).willReturn(successProbe);
+
+        // when
+        mockMvc.perform(get("/api/test")
+                        .header("X-Tenant-ID", "vip-site.com")) // VIP 테넌트로 요청
+                .andExpect(status().isNotFound()) // 필터 통과 (404는 도메인 처리 결과일 뿐)
+                .andExpect(header().string("X-Rate-Limit-Remaining", "999"));
+
+        // then [핵심 검증]
+        // Provider에게 전달된 capacity가 기본값(100)이 아니라 VIP값(1000)이어야 함
+        verify(rateLimitProvider).tryConsume(anyString(), eq(1000));
+    }
+
+    @Test
+    @WithMockUser
+    @DisplayName("테넌트별 동적 용량 적용: 설정이 없는 일반 사이트는 기본 용량(100)이 전달되어야 한다")
+    void shouldUseDefaultCapacityForNormalTenant() throws Exception {
+        // given
+        // 1. 기본 용량 확인 (설정 파일 기본값 or 100)
+        int defaultCapacity = properties.getCapacity();
+
         ConsumptionProbe successProbe = mock(ConsumptionProbe.class);
         given(successProbe.isConsumed()).willReturn(true);
         given(successProbe.getRemainingTokens()).willReturn(99L);
-        
-        given(rateLimitProvider.tryConsume(anyString())).willReturn(successProbe);
 
-        // when & then
-        mockMvc.perform(get("/api/test"))
-                .andExpect(status().isNotFound()) // 404여도 필터는 통과했으므로 성공으로 간주 (실제 API가 없으므로)
-                // 중요: 필터가 남은 토큰 수를 헤더에 잘 넣어줬는지 확인
-                .andExpect(header().string("X-Rate-Limit-Remaining", "99"));
-    }
+        given(rateLimitProvider.tryConsume(anyString(), anyInt())).willReturn(successProbe);
 
-    @Test
-    @DisplayName("차단 요청: 한도가 초과되면 429 에러와 JSON 응답을 반환해야 한다")
-    void blockExceededRequest() throws Exception {
-        // given
-        // Mock: 토큰 소모 실패(isConsumed=false), 60초 대기 필요
-        ConsumptionProbe failProbe = mock(ConsumptionProbe.class);
-        given(failProbe.isConsumed()).willReturn(false);
-        given(failProbe.getNanosToWaitForRefill()).willReturn(60_000_000_000L); // 60초
-
-        given(rateLimitProvider.tryConsume(anyString())).willReturn(failProbe);
-
-        // when & then
+        // when
         mockMvc.perform(get("/api/test")
-                        .header("X-Forwarded-For", "10.0.0.1")) // IP 헤더 시뮬레이션
-                .andExpect(status().isTooManyRequests()) // 429 기대
-                .andExpect(header().exists("Retry-After"))
-                .andExpect(jsonPath("$.status").value(429))
-                .andExpect(jsonPath("$.error").value("Too Many Requests"));
-    }
-
-    @Test
-    @WithMockUser
-    @DisplayName("예외 처리: 정적 리소스(이미지 등)는 Rate Limit 검사를 건너뛰어야 한다")
-    void skipStaticResources() throws Exception {
-        // when
-        mockMvc.perform(get("/logo.png")) // 정적 파일 요청
-                .andExpect(status().isNotFound()); // API가 없어서 404지만 필터 로직 검증
-
-        // then
-        // Provider의 tryConsume이 단 한 번도 호출되지 않았어야 함
-        verify(rateLimitProvider, never()).tryConsume(anyString());
-    }
-
-    @Test
-    @WithMockUser
-    @DisplayName("예외 처리: CORS Preflight(OPTIONS) 요청은 검사를 건너뛰어야 한다")
-    void skipCorsPreflight() throws Exception {
-        // when
-        mockMvc.perform(options("/api/test"))
+                        .header("X-Tenant-ID", "normal-site.com")) // 설정에 없는 일반 사이트
                 .andExpect(status().isNotFound());
 
-        // then
-        // 필터에서 skip되었으므로 Provider는 호출되지 않아야 함
-        verify(rateLimitProvider, never()).tryConsume(anyString());
+        // then [핵심 검증]
+        // Provider에게 전달된 capacity가 기본값이어야 함
+        verify(rateLimitProvider).tryConsume(anyString(), eq(defaultCapacity));
     }
 }

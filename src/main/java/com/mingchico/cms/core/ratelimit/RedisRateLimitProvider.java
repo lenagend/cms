@@ -143,14 +143,23 @@ public class RedisRateLimitProvider implements RateLimitProvider {
      * @return ConsumptionProbe (남은 토큰 수, 대기 시간 등의 결과 정보)
      */
     @Override
-    public ConsumptionProbe tryConsume(String key) {
-        // Redis Key 충돌 방지를 위한 접두사
+    public ConsumptionProbe tryConsume(String key, int capacity) {
         String redisKey = KEY_PREFIX + key;
 
-        // proxyManager가 Redis에 가서 확인합니다.
-        // "이 키(redisKey)에 해당하는 버킷 있어? 없으면 설정(supplier)대로 새로 만들어. 그리고 토큰 1개만 써봐."
+        // [동적 설정 공급자]
+        // 요청된 capacity에 맞춰 버킷 설정을 생성합니다.
+        Supplier<BucketConfiguration> configSupplier = () -> BucketConfiguration.builder()
+                .addLimit(Bandwidth.builder()
+                        .capacity(capacity)
+                        .refillGreedy(capacity, Duration.ofMinutes(1))
+                        .build())
+                .build();
+
+        // ProxyManager가 Redis에 키가 없으면 위 설정(supplier)대로 생성하고, 있으면 그대로 사용합니다.
+        // 주의: 이미 키가 존재하면(생성된 지 얼마 안 됨) 파라미터로 넘긴 capacity가 무시되고 기존 설정이 유지됩니다.
+        // 설정 변경을 즉시 반영하려면 Redis Key를 날려야 합니다.
         return proxyManager.builder()
-                .build(redisKey, bucketConfigSupplier)
+                .build(redisKey, configSupplier)
                 .tryConsumeAndReturnRemaining(1);
     }
 

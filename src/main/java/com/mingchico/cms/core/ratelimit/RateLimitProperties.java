@@ -8,7 +8,9 @@ import org.springframework.validation.annotation.Validated;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -50,12 +52,18 @@ public class RateLimitProperties {
      private Mode mode = Mode.LOCAL;
 
     /**
-     * 허용량 (Capacity)
+     * 기본허용량 (Capacity)
+     * -별도 설정이 없는 테넌트는 이 값을 따릅니다.
      * - IP당 1분 동안 허용할 최대 요청 수
      * - 예: 100이면 1분에 100회 요청 가능 (약 0.6초당 1회)
      */
      @Min(1)
      private int capacity = 100;
+
+    // [추가됨: 테넌트별 개별 용량 설정]
+    // Key: siteCode, Value: capacity
+    // 예: "vip-shop": 1000, "bad-shop": 10
+    private Map<String, Integer> perTenantCapacities = new HashMap<>();
 
     /**
      * [신뢰할 수 있는 프록시 IP 목록]

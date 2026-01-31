@@ -58,19 +58,22 @@ public class LocalRateLimitProvider implements RateLimitProvider {
     }
 
     @Override
-    public ConsumptionProbe tryConsume(String key) {
+    public ConsumptionProbe tryConsume(String key, int capacity) {
         // Cache에서 해당 IP의 버킷을 가져오거나, 없으면 새로 생성(createNewBucket)하여 토큰 소모 시도
-        return cache.get(key, this::createNewBucket).tryConsumeAndReturnRemaining(1);
+        return cache.get(key, k -> createNewBucket(capacity))
+                .tryConsumeAndReturnRemaining(1);
     }
 
-    private Bucket createNewBucket(String key) {
+    private Bucket createNewBucket(int capacity) {
         // [알고리즘 설명: Token Bucket]
         // - Capacity: 버킷의 최대 크기 (최대 토큰 수)
         // - Refill: 토큰이 충전되는 속도
         // Greedy 방식: 1분마다 한 번에 채우는 게 아니라, 시간에 비례해서 부드럽게 채워짐 (사용자 경험에 유리)
 
-        Bandwidth limit = Bandwidth.classic(properties.getCapacity(),
-                Refill.greedy(properties.getCapacity(), Duration.ofMinutes(1)));
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(capacity)
+                .refillGreedy(capacity, Duration.ofMinutes(1))
+                .build();
 
         return Bucket.builder()
                 .addLimit(limit)

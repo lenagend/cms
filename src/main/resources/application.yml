@@ -59,7 +59,6 @@ cms:
         - ".woff2"
         - ".ttf"
         - ".webp"
-        -
     tenant:
       excluded-paths:
         - "/favicon.ico"        # 파비콘

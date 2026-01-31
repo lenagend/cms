@@ -1,6 +1,7 @@
 package com.mingchico.cms.core.ratelimit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mingchico.cms.core.tenant.TenantContext;
 import io.github.bucket4j.ConsumptionProbe;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -96,39 +97,43 @@ public class GlobalRateLimitFilter extends OncePerRequestFilter {
                                     @NonNull FilterChain filterChain)
             throws ServletException, IOException {
 
-        // 1. 제외 대상(정적 파일 등)인지 확인하고, 맞으면 즉시 통과
         if (shouldSkipRateLimit(request)) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // 2. 클라이언트의 실제 IP 추출 (보안 로직 포함)
+        // 1. 키 생성 (Tenant Isolation)
+        // TenantFilter가 앞단에서 채워준 Context를 활용합니다.
+        String siteCode = TenantContext.getSiteCode();
+        if (!StringUtils.hasText(siteCode)) {
+            siteCode = "anonymous"; // 테넌트 식별 실패 시(예: 제외 경로) 기본값
+        }
+
         String clientIp = resolveClientIp(request);
-        String rateLimitKey = clientIp + ":" + request.getRequestURI();
+
+        // [Key 구조] siteCode:clientIp:uri
+        // 예: "shop_a:127.0.0.1:/api/login"
+        String rateLimitKey = siteCode + ":" + clientIp + ":" + request.getRequestURI();
+
+        // 2. 용량 결정 (Dynamic Capacity)
+        // 설정 맵에서 siteCode로 조회해보고, 없으면 기본 capacity(100) 사용
+        int capacity = properties.getPerTenantCapacities()
+                .getOrDefault(siteCode, properties.getCapacity());
 
         try {
-            // 3. 토큰 소모 시도 (핵심)
-            ConsumptionProbe probe = rateLimitProvider.tryConsume(rateLimitKey);
+            // 3. 토큰 소모 시도
+            ConsumptionProbe probe = rateLimitProvider.tryConsume(rateLimitKey, capacity);
 
             if (probe.isConsumed()) {
-                // [성공] 토큰이 남아있음 -> 통과
-                // 클라이언트에게 "앞으로 X번 더 요청 가능" 정보를 헤더로 알려줍니다 (친절한 API).
                 response.addHeader("X-Rate-Limit-Remaining", String.valueOf(probe.getRemainingTokens()));
                 filterChain.doFilter(request, response);
             } else {
-                // [실패] 토큰 부족 -> 429 에러 반환 (차단)
-                long waitForRefillSeconds = Math.max(
-                        1,
-                        probe.getNanosToWaitForRefill() / 1_000_000_000
-                );
-                log.debug("Rate Limit Exceeded: {}", clientIp);
+                long waitForRefillSeconds = Math.max(1, probe.getNanosToWaitForRefill() / 1_000_000_000);
+                log.warn("Rate Limit Exceeded for Tenant[{}]: IP={}", siteCode, clientIp);
                 handleRateLimitExceeded(response, waitForRefillSeconds);
             }
         } catch (Exception e) {
-            // [Fail-Open 정책]
-            // Redis가 죽거나 연결이 끊겨서 에러가 나더라도, 고객의 비즈니스 요청을 막으면 안 됩니다.
-            // 보안보다는 '서비스 가용성'을 선택하여 에러 로그만 남기고 요청을 통과시킵니다.
-            log.error("Rate Limit System Error (Bypassing for IP: {}): {}", clientIp, e.getMessage());
+            log.error("Rate Limit System Error (Bypassing): {}", e.getMessage());
             filterChain.doFilter(request, response);
         }
     }
