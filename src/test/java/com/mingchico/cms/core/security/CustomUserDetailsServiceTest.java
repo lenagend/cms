@@ -54,16 +54,13 @@ class CustomUserDetailsServiceTest {
      * 테넌트 정보가 있고 멤버십이 존재하는 경우 UserDetails 객체가 정확히 생성되는지 확인합니다.
      */
     @Test
-    @DisplayName("정상: 현재 테넌트에 멤버십이 있는 유저는 조회에 성공한다")
+    @DisplayName("성공: CustomUserDetails가 반환되며, 사이트 코드와 이메일이 정확히 매핑된다")
     void loadUserByUsername_success() {
-        // [1] 데이터 세팅 (Given)
+        // Given
         String email = "test@mingchico.com";
         String siteCode = "site-a";
-
-        // 필터가 해주는 테넌트 설정 과정을 수동으로 재현
         TenantContext.setSiteCode(siteCode);
 
-        // 가짜 유저 엔티티 생성
         User mockUser = User.builder()
                 .email(email)
                 .password("encodedPw")
@@ -71,7 +68,6 @@ class CustomUserDetailsServiceTest {
                 .status(UserStatus.ACTIVE)
                 .build();
 
-        // 가짜 멤버십 엔티티 생성 (유저 + 사이트 연결)
         Membership mockMembership = Membership.builder()
                 .user(mockUser)
                 .tenant(Tenant.builder().siteCode(siteCode).build())
@@ -79,20 +75,22 @@ class CustomUserDetailsServiceTest {
                 .status(Membership.MembershipStatus.ACTIVE)
                 .build();
 
-        // 레포지토리가 이메일과 사이트코드로 조회 시 가짜 멤버십을 반환하도록 설정
         given(membershipRepository.findActiveMembership(email, siteCode))
                 .willReturn(Optional.of(mockMembership));
 
-        // [2] 로직 실행 (When)
-        // 시큐리티가 인증 시 사용하는 메서드 호출
-        UserDetails details = userDetailsService.loadUserByUsername(email);
+        // When
+        UserDetails result = userDetailsService.loadUserByUsername(email);
 
-        // [3] 결과 검증 (Then)
-        assertThat(details.getUsername()).isEqualTo(email); // 이메일 일치 확인
-        assertThat(details.getPassword()).isEqualTo("encodedPw"); // 비밀번호 일치 확인
-        assertThat(details.getAuthorities()).hasSize(1); // 권한 개수 확인
-        // "ROLE_" 접두사가 붙은 권한이 정상 부여되었는지 확인
-        assertThat(details.getAuthorities().iterator().next().getAuthority()).isEqualTo("ROLE_ADMIN");
+        // Then
+        // [검증 포인트] 반환된 객체가 CustomUserDetails 인스턴스여야 함
+        assertThat(result).isInstanceOf(CustomUserDetails.class);
+
+        CustomUserDetails customUser = (CustomUserDetails) result;
+        assertThat(customUser.getUsername()).isEqualTo(email);
+        assertThat(customUser.getSiteCode()).isEqualTo(siteCode); // 사이트 코드 검증 필수
+        assertThat(customUser.getRole()).isEqualTo(Role.ADMIN);
+        assertThat(customUser.getAuthorities()).hasSize(1);
+        assertThat(customUser.getAuthorities().iterator().next().getAuthority()).isEqualTo("ROLE_ADMIN");
     }
 
     /**

@@ -1,9 +1,6 @@
 package com.mingchico.cms.core.config;
 
-import com.mingchico.cms.core.security.FormAuthenticationFailureHandler;
-import com.mingchico.cms.core.security.FormAuthenticationSuccessHandler;
-import com.mingchico.cms.core.security.SecurityProperties;
-import com.mingchico.cms.core.security.SmartAuthenticationEntryPoint;
+import com.mingchico.cms.core.security.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.security.servlet.PathRequest;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -15,18 +12,26 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.rememberme.JdbcTokenRepositoryImpl;
 import org.springframework.security.web.authentication.rememberme.PersistentTokenRepository;
+import org.springframework.security.web.authentication.session.CompositeSessionAuthenticationStrategy;
+import org.springframework.security.web.authentication.session.RegisterSessionAuthenticationStrategy;
+import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
+import org.springframework.security.web.authentication.session.SessionFixationProtectionStrategy;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.session.HttpSessionEventPublisher;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 import javax.sql.DataSource;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * <h3>[스프링 시큐리티 핵심 설정]</h3>
@@ -51,6 +56,45 @@ public class SecurityConfig {
     private final SmartAuthenticationEntryPoint authenticationEntryPoint;
     private final UserDetailsService userDetailsService;
     private final DataSource dataSource;
+
+    // --- [Section 세션 관련 빈 정의] ---
+
+    /**
+     * [세션 레지스트리]
+     * 현재 로그인된 사용자 목록을 관리합니다. (동시 접속 제어 필수)
+     */
+    @Bean
+    public SessionRegistry sessionRegistry() {
+        return new SessionRegistryImpl();
+    }
+
+    /**
+     * [세션 이벤트 발행자]
+     * Tomcat의 세션 생성/소멸 이벤트를 감지하여 Registry를 최신화합니다.
+     */
+    @Bean
+    public HttpSessionEventPublisher httpSessionEventPublisher() {
+        return new HttpSessionEventPublisher();
+    }
+
+    /**
+     * [복합 세션 인증 전략]
+     * 로그인 성공 시 실행할 작업들을 순서대로 조립합니다.
+     */
+    @Bean
+    public CompositeSessionAuthenticationStrategy sessionAuthenticationStrategy() {
+        List<SessionAuthenticationStrategy> strategies = new ArrayList<>();
+
+        // 1. 동시 접속 제어 (우리가 만든 커스텀 전략)
+        strategies.add(new TenantAwareSessionStrategy(sessionRegistry(), properties));
+        // 2. 세션 고정 보호 (로그인 시 세션 ID 교체)
+        strategies.add(new SessionFixationProtectionStrategy());
+
+        // 3. 레지스트리 등록 (필수)
+        strategies.add(new RegisterSessionAuthenticationStrategy(sessionRegistry()));
+
+        return new CompositeSessionAuthenticationStrategy(strategies);
+    }
 
     /**
      * <h3>[1. API 전용 보안 체인]</h3>
@@ -174,22 +218,12 @@ public class SecurityConfig {
                 // [세션 관리]
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
-                        .maximumSessions(1) // 동시 접속 1개 제한
-                        .expiredUrl("/login?expired")
+                        .sessionAuthenticationStrategy(sessionAuthenticationStrategy())
                 );
 
         return http.build();
     }
 
-    /**
-     * [세션 이벤트 발행자]
-     * Spring Security가 세션 생성/파기 이벤트를 정확히 감지하도록 돕습니다.
-     * sessionManagement().maximumSessions(1) 동작의 신뢰성을 높여줍니다.
-     */
-    @Bean
-    public HttpSessionEventPublisher httpSessionEventPublisher() {
-        return new HttpSessionEventPublisher();
-    }
 
     /**
      * [JDBC 토큰 저장소]

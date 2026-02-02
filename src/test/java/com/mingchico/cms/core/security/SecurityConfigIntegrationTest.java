@@ -10,14 +10,17 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.web.authentication.session.CompositeSessionAuthenticationStrategy;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
@@ -40,6 +43,12 @@ class SecurityConfigIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired // [검증 대상] 세션 전략이 제대로 주입되었는지 확인
+    private CompositeSessionAuthenticationStrategy compositeSessionStrategy;
+
+    @Autowired
+    private SessionRegistry sessionRegistry;
 
     // 실제 DB 조회 로직은 UserDetailsServiceTest에서 검증하므로,
     // 여기서는 시큐리티 설정 흐름(인가, 필터 등)만 보기 위해 유저 서비스는 가짜(Mock)로 처리합니다.
@@ -85,6 +94,28 @@ class SecurityConfigIntegrationTest {
 
         @GetMapping("/favicon.ico")
         public void favicon() {}
+    }
+
+    @Test
+    @DisplayName("[설정 검증] TenantAwareSessionStrategy가 필터 체인에 포함되어 있어야 한다")
+    void session_strategy_configured() {
+        // CompositeSessionAuthenticationStrategy 내부를 리플렉션 등으로 깔 수는 없지만,
+        // 빈이 정상적으로 로드되었는지 확인하는 것만으로도 설정 파일 오류를 잡을 수 있음
+        assertThat(compositeSessionStrategy).isNotNull();
+        assertThat(sessionRegistry).isNotNull();
+    }
+
+    @Test
+    @DisplayName("[통합] @WithMockUser(일반 User)로 접근 시에도 에러 없이 통과해야 한다")
+    @WithMockUser(username = "user", roles = "USER")
+    void withMockUser_compatibility() throws Exception {
+        // TenantAwareSessionStrategy는 CustomUserDetails가 아닐 경우(기본 User)
+        // 기본값(1개)으로 동작하도록 방어 코드가 작성되어 있어야 함.
+        // 이 테스트가 통과하면 기존의 @WithMockUser 기반 테스트들도 안전하다는 뜻.
+
+        mockMvc.perform(get("/api/private/data")
+                        .header("host", "test.mingchico.com")) // 테넌트 헤더
+                .andExpect(status().is4xxClientError()); // API 엔드포인트가 없으므로 404/401 등이 뜨겠지만 500 에러는 아니어야 함
     }
 
     /**

@@ -18,9 +18,8 @@ import org.springframework.util.StringUtils;
 /**
  * <h3>[SaaS 사용자 인증 서비스]</h3>
  * <p>
- * 1. <b>식별:</b> 이메일(Principal) + 현재 사이트 코드(Context)
- * 2. <b>인증:</b> 해당 조합의 Membership 존재 여부 확인
- * 3. <b>인가:</b> Membership에 정의된 Role 부여
+ * 이메일(ID)뿐만 아니라 <b>현재 접속 경로(Tenant)</b>에 유효한 멤버십이 있는지 검증하고,
+ * 테넌트 정보가 포함된 CustomUserDetails를 반환합니다.
  * </p>
  */
 @Slf4j
@@ -31,41 +30,36 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     private final MembershipRepository membershipRepository;
 
-    /**
-     * @param email 로그인 폼에서 입력받은 이메일 (Spring Security에서는 변수명이 username임)
-     */
     @Override
     public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
 
-        // 1. 현재 접속한 사이트 코드 (TenantFilter -> ThreadLocal)
+        // 1. 테넌트 컨텍스트 확인
         String currentSiteCode = TenantContext.getSiteCode();
-
         if (!StringUtils.hasText(currentSiteCode)) {
+            log.error("Login Failed: Tenant Context is missing.");
             throw new UsernameNotFoundException("접속 경로의 테넌트 정보를 확인할 수 없습니다.");
         }
 
-        // 2. [인증] 이메일 + 사이트코드로 멤버십 조회
+        // 2. 멤버십 조회 (Tenant + Email)
         Membership membership = membershipRepository.findActiveMembership(email, currentSiteCode)
                 .orElseThrow(() -> new UsernameNotFoundException(
                         String.format("User '%s' not found or not a member of '%s'", email, currentSiteCode)));
 
         User user = membership.getUser();
 
-        // 3. [상태 체크 & Audit] - 실제 구현 시엔 여기서 lastLoginAt 업데이트 이벤트 발행 권장
+        //TODO: lastLoginAt 업데이트
 
-        // 4. UserDetails 반환
-        return org.springframework.security.core.userdetails.User.builder()
-                .username(user.getEmail()) // Principal은 Email
-                .password(user.getPassword())
+        // 3. 상태 검증
+        boolean enabled = (user.getStatus() == UserStatus.ACTIVE && membership.getStatus() == MembershipStatus.ACTIVE);
+        boolean nonLocked = (user.getStatus() != UserStatus.LOCKED && membership.getStatus() != MembershipStatus.BANNED);
 
-                // [권한 부여]
-                // 현재 접속한 TenantContext 하에서의 권한만 부여합니다.
-                .roles(membership.getRole().name())
-
-                .disabled(user.getStatus() != UserStatus.ACTIVE || membership.getStatus() != MembershipStatus.ACTIVE)
-                .accountLocked(user.getStatus() == UserStatus.LOCKED || membership.getStatus() == MembershipStatus.BANNED)
-                .accountExpired(false)
-                .credentialsExpired(false)
-                .build();
+        // 4. CustomUserDetails 반환
+        return new CustomUserDetails(
+                user,
+                currentSiteCode,
+                membership.getRole(),
+                enabled,
+                nonLocked
+        );
     }
 }

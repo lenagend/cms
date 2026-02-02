@@ -67,3 +67,13 @@ cms:
         - "/actuator/**"        # 헬스 체크 및 메트릭
         - "/api/admin/**"       # 관리자 API는 테넌트 무관
         - "/h2-console/**"      # H2 콘솔 (테스트용)
+        -
+      # 세션 제어 설정
+      session:
+        default-limit: 1        # 기본 허용 세션 수
+        role-limits:
+          ADMIN: 1           # -1은 무제한
+          MANAGER: 5
+          USER: 1
+        siteLimits:
+          ENTERPRISE_SITE: 10    # 특정 테넌트(사이트코드) 대응

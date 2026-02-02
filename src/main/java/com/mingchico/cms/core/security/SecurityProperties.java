@@ -3,8 +3,11 @@ package com.mingchico.cms.core.security;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
+
+import java.util.Map;
 
 /**
  * <h3>[보안 설정 프로퍼티]</h3>
@@ -17,7 +20,8 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "cms.security")
 public record SecurityProperties(
-        @Valid RememberMe rememberMe
+        @Valid RememberMe rememberMe,
+        @Valid SessionControl session
 ) {
 
     public record RememberMe(
@@ -26,5 +30,11 @@ public record SecurityProperties(
 
             @Min(value = 60, message = "Remember-Me 유효 시간은 최소 60초 이상이어야 합니다.")
             int validitySeconds
+    ) {}
+
+    public record SessionControl(
+            @NotNull Map<String, Integer> roleLimits,   // Role 이름별 제한 (e.g., ADMIN: -1)
+            @NotNull Map<String, Integer> siteLimits,   // Site Code별 제한 (e.g., ENTERPRISE: 10)
+            @Min(1) int defaultLimit                    // 기본값
     ) {}
 }
