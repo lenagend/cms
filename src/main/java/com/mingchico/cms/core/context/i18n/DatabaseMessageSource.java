@@ -36,7 +36,7 @@ public class DatabaseMessageSource extends AbstractMessageSource {
     public DatabaseMessageSource(I18nMessageRepository messageRepository, CacheManager cacheManager) {
         this.messageRepository = messageRepository;
 
-        // [안전장치] 캐시 설정 검증 - 구동 시점에 즉시 파악
+        // [Fail-Fast] 캐시 설정 누락은 런타임에 치명적이므로 기동 시점에 차단
         Cache cache = cacheManager.getCache(CACHE_NAME);
         if (cache == null) {
             throw new IllegalStateException("❌ Cache Config Error: '" + CACHE_NAME + "' cache is not found.");
@@ -50,13 +50,13 @@ public class DatabaseMessageSource extends AbstractMessageSource {
      */
     @Override
     protected MessageFormat resolveCode(@NonNull String code, @NonNull Locale locale) {
-        // [개선 2 반영] 키 충돌 방지를 위한 안전한 구분자 사용 (code|ko-KR)
+        // [Cache Key] 키 충돌 방지를 위해 구분자(|) 사용 (ex: "greeting|ko-KR")
         String key = code + KEY_SEPARATOR + locale.toLanguageTag();
 
         /*
-         * [캐시 조회 및 타입 명시]
-         * 1. 캐시에서 값을 가져오되, 반환 타입을 'String'으로 명확히 받아 혼동을 방지합니다.
-         * 2. 람다 내부: DB 조회 -> 없으면 NULL_PLACEHOLDER 반환 (Cache Negative)
+         * [Look Aside 전략]
+         * 1. 캐시 조회 (Hit) -> 즉시 반환
+         * 2. 캐시 없음 (Miss) -> DB 조회 -> 캐시 적재 (없으면 NULL_PLACEHOLDER 캐싱)
          */
         String cached = messageCache.get(key, () ->
                 messageRepository.findByCodeAndLocale(code, locale.toLanguageTag())
@@ -65,10 +65,9 @@ public class DatabaseMessageSource extends AbstractMessageSource {
         );
 
         /*
-         * [폴백(Fallback) 결정]
-         * - cached == null : 캐시 라이브러리 오류 등 방어 코드
-         * - cached == NULL_PLACEHOLDER : DB에 데이터가 없음을 확인
-         * -> 위 두 경우 null을 반환해야 Spring이 부모(File) 소스를 탐색합니다.
+         * [Fallback]
+         * DB에도 값이 없다면(NULL_PLACEHOLDER), null을 반환하여
+         * Spring이 다음 단계인 'File MessageSource'를 찾도록 유도합니다.
          */
         if (cached == null || NULL_PLACEHOLDER.equals(cached)) {
             return null;

@@ -13,7 +13,6 @@ import java.util.*;
  * <h3>[초기 데이터 동기화]</h3>
  * <p>
  * 배포 시 'messages_xx.properties' 파일의 내용을 DB로 적재합니다.
- * 이미 DB에 존재하는 키는 건드리지 않아(Skip), 운영자가 수정한 내용을 보존합니다.
  * </p>
  */
 @Slf4j
@@ -47,14 +46,15 @@ public class MessageDataInitializer implements ApplicationRunner {
                     String code = keys.nextElement();
                     String message = bundle.getString(code);
 
-                    // [중복 방지] DB에 없을 때만 Insert (운영 데이터 보호)
+                    // [Safe Insert] 운영 중 관리자가 수정한 내용을 덮어쓰지 않기 위해
+                    // DB에 데이터가 '없는 경우에만' 파일을 기준으로 추가합니다.
                     if (!repository.existsByCodeAndLocale(code, locale.toLanguageTag())) {
                         repository.save(new I18nMessage(code, locale, message));
                         totalAdded++;
                     }
                 }
             } catch (MissingResourceException e) {
-                // 특정 언어 파일이 아직 없어도 에러 없이 넘어가도록 처리
+                // 해당 언어의 프로퍼티 파일이 없으면 조용히 스킵 (Optional)
                 log.debug("ℹ️ No properties file found for locale: {}", locale);
             }
         }
