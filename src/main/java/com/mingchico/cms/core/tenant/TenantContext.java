@@ -1,5 +1,6 @@
 package com.mingchico.cms.core.tenant;
 
+import com.mingchico.cms.core.tenant.dto.TenantInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 
@@ -15,26 +16,35 @@ import org.springframework.util.StringUtils;
 public class TenantContext {
 
     private static final ThreadLocal<String> CURRENT_SITE_CODE = new ThreadLocal<>();
+    private static final ThreadLocal<TenantInfo> CURRENT_TENANT = new ThreadLocal<>();
 
+
+    public static TenantInfo getTenant() {
+        return CURRENT_TENANT.get();
+    }
     /**
-     * 현재 스레드에 사이트 코드를 저장합니다.
-     * @param siteCode 식별된 사이트 코드 (예: "SITE_A")
+     * 테넌트 정보를 컨텍스트에 바인딩합니다.
+     * @param info 캐시된 테넌트 메타데이터
      */
-    public static void setSiteCode(String siteCode) {
-        if (!StringUtils.hasText(siteCode)) {
-            // [방어 로직] 빈 값은 저장하지 않음 (이전 값이 남아있는지 확인 필요)
-            return;
-        }
-        CURRENT_SITE_CODE.set(siteCode);
+    public static void setContext(TenantInfo info) {
+        if (info == null) return;
+        CURRENT_SITE_CODE.set(info.siteCode());
+        CURRENT_TENANT.set(info);
     }
 
-    /**
-     * @return 현재 스레드에 바인딩된 사이트 코드 (없으면 null 반환)
-     */
     public static String getSiteCode() {
         return CURRENT_SITE_CODE.get();
     }
 
+    public static boolean isMaintenanceMode() {
+        TenantInfo info = CURRENT_TENANT.get();
+        return info != null && info.maintenance();
+    }
+
+    public static boolean isReadOnlyMode() {
+        TenantInfo info = CURRENT_TENANT.get();
+        return info != null && (info.readOnly() || info.maintenance());
+    }
     /**
      * [컨텍스트 초기화]
      * 스레드 풀(Thread Pool) 환경에서는 스레드가 재사용되므로,
@@ -42,5 +52,6 @@ public class TenantContext {
      */
     public static void clear() {
         CURRENT_SITE_CODE.remove();
+        CURRENT_TENANT.remove();
     }
 }

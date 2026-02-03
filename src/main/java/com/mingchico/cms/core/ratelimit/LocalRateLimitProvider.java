@@ -33,10 +33,7 @@ import java.time.Duration;
  */
 
 @Slf4j
-@Service
 @RequiredArgsConstructor
-// 'redis' 모드가 아닐 때(local이거나 없을 때) 동작하도록 설정하여 리소스 낭비 방지
-@ConditionalOnProperty(name = "cms.security.rate-limit.mode", havingValue = "LOCAL", matchIfMissing = true)
 public class LocalRateLimitProvider implements RateLimitProvider {
 
     private final RateLimitProperties properties;

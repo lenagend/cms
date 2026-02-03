@@ -44,14 +44,6 @@ public class RateLimitProperties {
     private boolean enabled = true;
 
     /**
-     * 모드 선택
-     * - "LOCAL": 각 서버 메모리에서 관리 (간단함, 성능 빠름, 서버 간 공유 안 됨)
-     * - "REDIS": Redis를 통해 관리 (분산 환경에서 정확한 제어 가능, 네트워크 비용 발생)
-     */
-     public enum Mode { LOCAL, REDIS }
-     private Mode mode = Mode.LOCAL;
-
-    /**
      * 기본허용량 (Capacity)
      * -별도 설정이 없는 테넌트는 이 값을 따릅니다.
      * - IP당 1분 동안 허용할 최대 요청 수

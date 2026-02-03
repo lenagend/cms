@@ -40,10 +40,7 @@ import java.util.function.Supplier;
  * </ul>
  */
 @Slf4j
-@Service
 @RequiredArgsConstructor
-// 설정 파일에서 'cms.security.rate-limit.mode=REDIS'일 때만 빈으로 등록됩니다.
-@ConditionalOnProperty(name = "cms.security.rate-limit.mode", havingValue = "REDIS")
 public class RedisRateLimitProvider implements RateLimitProvider {
 
     private static final String KEY_PREFIX = "ratelimit:";

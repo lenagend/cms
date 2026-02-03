@@ -2,10 +2,7 @@ package com.mingchico.cms.core.tenant.domain;
 
 import com.mingchico.cms.core.common.BaseAuditEntity;
 import jakarta.persistence.*;
-import lombok.AccessLevel;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
+import lombok.*;
 import org.hibernate.annotations.Comment;
 
 /**
@@ -43,6 +40,15 @@ public class Tenant extends BaseAuditEntity {
     @Comment("설명")
     private String description;
 
+    @Comment("사이트 운영 상태 (정상, 점검중, 정지 등)")
+    @Column(nullable = false)
+    @Setter
+    private boolean maintenance = false;
+
+    @Comment("읽기 전용 모드 여부")
+    @Column(nullable = false)
+    private boolean readOnly = false;
+
     // TODO: 사이트별 정책 (JSON) - 예: 비밀번호 복잡도, 가입 승인제 여부 등
     // @Column(columnDefinition = "json")
     // private String policy;
@@ -59,4 +65,6 @@ public class Tenant extends BaseAuditEntity {
         this.name = name; // 이제 NULL 에러가 나지 않습니다.
         this.description = description;
     }
+
+
 }

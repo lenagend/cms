@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
 public class MdcLoggingFilter extends OncePerRequestFilter {
 
     private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
-    private static final String MDC_KEY = "correlationId";
+    public static final String MDC_KEY = "correlationId";
 
     // [보안] 외부에서 조작된 이상한 ID(스크립트 주입 등)가 들어오는 것을 막기 위한 정규식입니다.
     // - 허용: 영문 대소문자, 숫자, 하이픈(-)

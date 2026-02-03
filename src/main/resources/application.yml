@@ -13,6 +13,27 @@ spring:
     show-sql: true
 
 cms:
+  # [1. 중앙 캐시 정책 관리] (New)
+  # 모든 모듈의 캐시 설정(TTL, MaxSize 등)을 여기서 통합 관리합니다.
+  cache:
+    # 시스템 전반의 캐시 저장소 모드 (LOCAL 또는 REDIS)
+    mode: LOCAL
+    # 기본 정책 (별도 설정 없는 캐시가 따름)
+    default-policy:
+      ttl: 10m
+      max-size: 1000
+
+    # 캐시별 상세 정책 정의
+    policies:
+      # 테넌트 메타데이터용 (기존 TenantProperties에서 이동)
+      tenant_meta:
+        ttl: 30m
+        max-size: 5000
+      # 다국어 메시지용 (기존 context.i18n에서 이동)
+      i18n_messages:
+        ttl: 60m
+        max-size: 10000
+
   async:
     thread-name-prefix: "cms-vt-"
 
@@ -37,7 +58,6 @@ cms:
     # 3. Rate Limit (RateLimitProperties 매핑)
     rate-limit:
       enabled: true
-      mode: LOCAL
       capacity: 100
       trusted-proxies:
         - "127.0.0.1"
@@ -77,3 +97,10 @@ cms:
           USER: 1
         siteLimits:
           ENTERPRISE_SITE: 10    # 특정 테넌트(사이트코드) 대응
+
+  #콘텍스트 홀더 설정
+  context:
+    channel:
+      admin-api-prefix: "/api/admin"
+      api-prefix: "/api"
+      admin-prefix: "/admin"

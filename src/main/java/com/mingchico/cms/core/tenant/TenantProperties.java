@@ -5,6 +5,7 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -42,4 +43,5 @@ public class TenantProperties {
             "/api/admin/**",       // 관리자 API (Security가 별도 제어)
             "/h2-console/**"       // H2 DB 콘솔 (개발용)
     );
+
 }
