@@ -40,6 +40,10 @@ public class Tenant extends BaseAuditEntity {
     @Comment("설명")
     private String description;
 
+    @Comment("적용된 테마 폴더명 (기존 templates/themes/{이름} 매핑)")
+    @Column(name = "theme_name", nullable = false, length = 50)
+    private String themeName = "default";
+
     @Comment("사이트 운영 상태 (정상, 점검중, 정지 등)")
     @Column(nullable = false)
     @Setter
@@ -53,17 +57,22 @@ public class Tenant extends BaseAuditEntity {
     // @Column(columnDefinition = "json")
     // private String policy;
 
+
     @Builder
-    public Tenant(String siteCode, String domainPattern, String name, String description) {
+    public Tenant(String siteCode, String domainPattern, String name, String description, String themeName) {
         this.siteCode = siteCode;
         this.domainPattern = domainPattern;
         this.name = name;
         this.description = description;
+        this.themeName = (themeName != null && !themeName.isBlank()) ? themeName : "default";
     }
 
-    public void update(String name, String description) {
-        this.name = name; // 이제 NULL 에러가 나지 않습니다.
+    public void update(String name, String description, String themeName) {
+        this.name = name;
         this.description = description;
+        if (themeName != null && !themeName.isBlank()) {
+            this.themeName = themeName;
+        }
     }
 
 

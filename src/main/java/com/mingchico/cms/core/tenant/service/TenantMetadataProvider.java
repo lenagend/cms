@@ -48,6 +48,7 @@ public class TenantMetadataProvider {
                 tenant.getId(),
                 tenant.getSiteCode(),
                 tenant.getName(),
+                tenant.getThemeName(),
                 tenant.isMaintenance(),
                 tenant.isReadOnly()
         );

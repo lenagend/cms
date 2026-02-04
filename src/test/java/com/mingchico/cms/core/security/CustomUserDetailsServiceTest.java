@@ -56,7 +56,7 @@ class CustomUserDetailsServiceTest {
 
         // [수정] setSiteCode(String) -> setContext(TenantInfo)로 변경
         // 테스트용 더미 TenantInfo 객체 생성 (ID 1L, 이름 "Test Site", 유지보수/읽기전용 false)
-        TenantInfo tenantInfo = new TenantInfo(1L, siteCode, "Test Site", false, false);
+        TenantInfo tenantInfo = new TenantInfo(1L, siteCode, "Test Site", "testThemeName", false, false);
         TenantContext.setContext(tenantInfo);
 
         User mockUser = User.builder()
@@ -109,7 +109,7 @@ class CustomUserDetailsServiceTest {
         String siteCode = "site-b";
 
         // [수정] setContext를 통해 TenantInfo 주입
-        TenantInfo tenantInfo = new TenantInfo(2L, siteCode, "Other Site", false, false);
+        TenantInfo tenantInfo = new TenantInfo(2L, siteCode, "Other Site", "testThemeName", false, false);
         TenantContext.setContext(tenantInfo);
 
         given(membershipRepository.findActiveMembership(anyString(), anyString()))

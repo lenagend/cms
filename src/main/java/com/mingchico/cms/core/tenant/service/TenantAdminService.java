@@ -63,7 +63,7 @@ public class TenantAdminService {
         Tenant tenant = tenantRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 테넌트 ID입니다."));
 
-        tenant.update(request.name(), request.description());
+        tenant.update(request.name(), request.description(), request.themeName());
 
         // [Cache] 이름/설명이 바뀌었으니 '메타데이터' 캐시만 삭제 (라우팅 갱신 불필요)
         tenantMetadataProvider.evictCache(tenant.getSiteCode());

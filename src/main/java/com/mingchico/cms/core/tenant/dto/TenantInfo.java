@@ -13,6 +13,7 @@ public record TenantInfo(
         Long id,
         String siteCode,
         String name,
+        String themeName,
         boolean maintenance,
         boolean readOnly
 ) implements Serializable {

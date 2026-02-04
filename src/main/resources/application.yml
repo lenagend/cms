@@ -33,7 +33,26 @@ cms:
       i18n_messages:
         ttl: 60m
         max-size: 10000
+  # [초기 관리자 및 보안 부트스트랩]
+  # TODO: 상황에 맞게 커스텀 필요
+  bootstrap:
+    admin:
+      email: "lenagend@naver.com"
+      # 초기 비밀번호 (반드시 변경 권장)
+      password: "1234"
+      nickname: "SuperAdmin"
+    tenant:
+      # [보안 전략] 흔한 'ADMIN' 대신 예측 불가능한 코드를 사용하여 공격 표면을 줄입니다.
+      site-code: "M_CONSOLE"
+      # 관리자 접속 경로 (이 도메인으로 접속해야만 관리자 권한 행사 가능)
+      domain: "console.localhost"
+      name: "Master Console"
 
+    # 관리자 페이지 접근 허용 IP 목록 (CIDR 지원)
+    admin-ip-allowlist:
+      - "127.0.0.1"
+      - "0:0:0:0:0:0:0:1" # IPv6 Localhost
+      # - "192.168.0.0/24" # 사내망 예시
   async:
     thread-name-prefix: "cms-vt-"
 
@@ -79,15 +98,7 @@ cms:
         - ".woff2"
         - ".ttf"
         - ".webp"
-    tenant:
-      excluded-paths:
-        - "/favicon.ico"        # 파비콘
-        - "/error"              # 에러 페이지
-        - "/static/**"          # 정적 리소스 (css, js 등)
-        - "/actuator/**"        # 헬스 체크 및 메트릭
-        - "/api/admin/**"       # 관리자 API는 테넌트 무관
-        - "/h2-console/**"      # H2 콘솔 (테스트용)
-        -
+
       # 세션 제어 설정
       session:
         default-limit: 1        # 기본 허용 세션 수
@@ -98,6 +109,15 @@ cms:
         siteLimits:
           ENTERPRISE_SITE: 10    # 특정 테넌트(사이트코드) 대응
 
+  tenant:
+    excluded-paths:
+      - "/favicon.ico"        # 파비콘
+      - "/error"              # 에러 페이지
+      - "/static/**"          # 정적 리소스 (css, js 등)
+      - "/actuator/**"        # 헬스 체크 및 메트릭
+      - "/api/admin/**"       # 관리자 API는 테넌트 무관
+      - "/h2-console/**"      # H2 콘솔 (테스트용)
+      -
   #콘텍스트 홀더 설정
   context:
     channel:

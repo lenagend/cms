@@ -33,9 +33,9 @@ public class TenantDto {
      */
     public record UpdateRequest(
             @NotBlank(message = "사이트 이름은 필수입니다.")
-            String name, // [추가] 엔티티의 name 필드 충족을 위해 추가
-
-            String description
+            String name,
+            String description,
+            String themeName
     ) {}
 
     /**
