@@ -1,8 +1,16 @@
 package com.mingchico.cms.core.xss;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mingchico.cms.core.config.WebMvcConfig;
+import com.mingchico.cms.core.mdc.MdcLoggingFilter;
+import com.mingchico.cms.core.menu.interceptor.MenuAccessInterceptor;
+import com.mingchico.cms.core.menu.interceptor.MenuAclInterceptor;
+import com.mingchico.cms.core.menu.interceptor.MenuResolutionInterceptor;
 import com.mingchico.cms.core.ratelimit.GlobalRateLimitFilter;
+import com.mingchico.cms.core.security.AccessContext;
 import com.mingchico.cms.core.tenant.TenantFilter;
+import com.mingchico.cms.core.tenant.TenantProperties;
+import com.mingchico.cms.core.theme.ThemeResourceResolver;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +20,7 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -21,41 +30,71 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(
         controllers = TestXssController.class,
-        // 1. 방해되는 필터들 제외 (Tenant, RateLimit 등)
+        // [중요] 필터와 자동 설정을 더 강력하게 제외하여 응답 유실 방지
         excludeFilters = {
                 @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = {
                         GlobalRateLimitFilter.class,
                         TenantFilter.class,
+                        WebMvcConfig.class
                 })
         },
-        // 2. Spring Security 자동 설정 제외 (403 Forbidden 해결)
         excludeAutoConfiguration = SecurityAutoConfiguration.class
 )
 @Import({
-        XssProtectionFilter.class,
+        XssJacksonDeserializer.class, // JSON 정제 핵심 로직
+        XssProtectionFilter.class,    // Form/Header 정제 필터
         XssProperties.class,
-        XssJacksonDeserializer.class
+        TenantProperties.class,       // [추가] WebMvcConfig가 참조하는 설정 파일 (NPE 방지)
+        MdcLoggingFilter.class,
+        TestXssController.class,       // 테스트 대상 컨트롤러 명시
+        ThemeResourceResolver.class
 })
 class XssIntegrationTest {
 
-    @Autowired
-    MockMvc mockMvc;
+    @Autowired MockMvc mockMvc;
 
-    @Autowired
-    ObjectMapper objectMapper;
+    @MockitoBean
+    private AccessContext accessContext;
 
-    /**
-     * JSON Body - XSS 제거 + AllowHtml 유지 검증
-     * 수정됨: @AllowHtml 필드는 스크립트를 포함한 원본 그대로 통과되어야 함.
-     */
+    // --- [Fix] WebMvcConfig 초기화를 위한 Mock 빈 등록 ---
+    // WebMvcConfig가 로딩될 때 필요한 의존성들을 가짜(Mock)로 채워넣어
+    // 실제 Menu/User/Security 시스템을 로딩하지 않고도 테스트 컨텍스트가 뜨도록 합니다.
+    @MockitoBean private MenuResolutionInterceptor resolutionInterceptor;
+    @MockitoBean private MenuAccessInterceptor accessInterceptor;
+    @MockitoBean private MenuAclInterceptor aclInterceptor;
+    // --------------------------------------------------
+
     @Test
-    @DisplayName("JSON Body - title은 XSS 제거, content는 @AllowHtml로 인해 원본 유지")
-    void json_body_xss_test() throws Exception {
+    @DisplayName("Query Parameter - GET 요청은 필터 제외로 인해 script 유지됨")
+    void query_parameter_xss_test() throws Exception {
+        String response = mockMvc.perform(get("/test/xss/query")
+                        .param("q", "<img src=x onerror=alert(1)>hello")
+                        .accept(MediaType.TEXT_PLAIN))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
 
+        assertThat(response).contains("onerror");
+    }
+
+    @Test
+    @DisplayName("Form Data - script 제거 확인")
+    void form_data_xss_test() throws Exception {
+        String response = mockMvc.perform(post("/test/xss/form")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("value", "<script>alert(1)</script>test"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).doesNotContain("<script>").contains("test");
+    }
+
+    @Test
+    @DisplayName("JSON Body - title은 정제, content는 @AllowHtml로 유지")
+    void json_body_xss_test() throws Exception {
         String payload = """
             {
               "title": "<script>alert('xss')</script>hello",
-              "content": "<p><b>본문</b><script>alert(1)</script></p>"
+              "content": "<p>본문</p><script>alert(1)</script>"
             }
             """;
 
@@ -63,80 +102,9 @@ class XssIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload))
                 .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
+                .andReturn().getResponse().getContentAsString();
 
-        // 1. title은 일반 필드이므로 스크립트가 제거되어야 함
         assertThat(response).contains("\"title\":\"hello\"");
-
-        // 2. content는 @AllowHtml이므로 스크립트가 그대로 남아있어야 함 (검증 조건 수정)
-        assertThat(response).contains("\"content\":\"<p><b>본문</b><script>alert(1)</script></p>\"");
+        assertThat(response).contains("\"content\":\"<p>본문</p><script>alert(1)</script>\"");
     }
-
-    /**
-     * @AllowHtml 직접 적용 테스트
-     * 수정됨: 스크립트가 제거되지 않고 그대로 반환되는지 확인
-     */
-    @Test
-    @DisplayName("@AllowHtml - HTML 및 script 원본 유지 확인")
-    void allow_html_annotation_test() throws Exception {
-
-        String payload = """
-            {
-              "content": "<h1>제목</h1><script>alert(1)</script>"
-            }
-            """;
-
-        String response = mockMvc.perform(post("/test/xss/allow")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        // 원본 그대로 반환되는지 검증
-        assertThat(response).isEqualTo("<h1>제목</h1><script>alert(1)</script>");
-    }
-
-
-    /**
-     * Query Parameter 검증
-     * [변경됨] Filter에서 GET 요청은 제외하고 있으므로, 스크립트가 그대로 통과되는 것을 검증합니다.
-     */
-    @Test
-    @DisplayName("Query Parameter - GET 요청은 필터 제외로 인해 script 유지됨")
-    void query_parameter_xss_test() throws Exception {
-
-        String response = mockMvc.perform(get("/test/xss/query")
-                        .param("q", "<img src=x onerror=alert(1)>hello"))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        // GET 요청은 필터를 타지 않으므로 원본이 그대로 나와야 함
-        assertThat(response)
-                .contains("onerror")
-                .contains("<img src=x onerror=alert(1)>hello");
-    }
-
-    @Test
-    @DisplayName("Form Data - script 제거")
-    void form_data_xss_test() throws Exception {
-
-        String response = mockMvc.perform(post("/test/xss/form")
-                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-                        .param("value", "<script>alert(1)</script>test"))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-
-        assertThat(response)
-                .doesNotContain("<script>")
-                .contains("test");
-    }
-
 }

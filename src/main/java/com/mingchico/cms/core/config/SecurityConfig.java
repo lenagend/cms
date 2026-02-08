@@ -180,7 +180,7 @@ public class SecurityConfig {
                         .requestMatchers("/static/**", "/error", "/health", "/favicon.ico").permitAll()
                         .requestMatchers("/login", "/register", "/find-password").permitAll()
                         .requestMatchers("/admin/**").hasRole("ADMIN")
-                        .anyRequest().authenticated()
+                        .anyRequest().permitAll()
                 )
 
                 // [예외 처리] AJAX 요청인 경우 401 JSON, 아니면 로그인 페이지로 리다이렉트

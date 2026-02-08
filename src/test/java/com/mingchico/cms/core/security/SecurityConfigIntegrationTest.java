@@ -3,13 +3,14 @@ package com.mingchico.cms.core.security;
 import com.mingchico.cms.core.tenant.DomainTenantResolver;
 import com.mingchico.cms.core.tenant.domain.Tenant;
 import com.mingchico.cms.core.tenant.repository.TenantRepository;
+import com.mingchico.cms.core.user.repository.MembershipRepository; // [추가]
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import; // [Import 추가]
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -34,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import(SecurityConfigIntegrationTest.TestController.class) //  내부 컨트롤러를 빈으로 등록
+@Import(SecurityConfigIntegrationTest.TestController.class)
 class SecurityConfigIntegrationTest {
 
     @Autowired
@@ -53,15 +54,23 @@ class SecurityConfigIntegrationTest {
     private TenantRepository tenantRepository;
 
     @Autowired
+    private MembershipRepository membershipRepository; // [추가] FK 관계 정리를 위해 필요
+
+    @Autowired
     private DomainTenantResolver domainTenantResolver;
 
     @BeforeEach
     void setUp() {
+        // [수정] 삭제 순서: 자식(Membership) -> 부모(Tenant)
+        membershipRepository.deleteAll();
         tenantRepository.deleteAll();
+
+        // [수정] themeName 필드 추가 반영
         tenantRepository.save(Tenant.builder()
                 .domainPattern("test.mingchico.com")
                 .siteCode("TEST_SITE")
                 .name("테스트 사이트")
+                .themeName("default") // [필수] 테넌트 엔티티 변경 사항 반영
                 .build());
 
         domainTenantResolver.refreshRules();
@@ -77,7 +86,6 @@ class SecurityConfigIntegrationTest {
 
     /**
      * [테스트용 컨트롤러]
-     * @Import를 통해 빈으로 등록되어야 URL 매핑이 정상 동작합니다.
      */
     @RestController
     static class TestController {
@@ -111,7 +119,6 @@ class SecurityConfigIntegrationTest {
     @DisplayName("[통합] @WithMockUser(일반 User)로 접근 시에도 에러 없이 통과해야 한다")
     @WithMockUser(username = "user", roles = "USER")
     void withMockUser_compatibility() throws Exception {
-        // 컨트롤러가 존재하므로 404가 아닌 200 OK (User 접근 허용 가정)
         mockMvc.perform(get("/api/private/data")
                         .header("host", "test.mingchico.com"))
                 .andExpect(status().isOk());
@@ -127,7 +134,6 @@ class SecurityConfigIntegrationTest {
     @Test
     @DisplayName("[WEB] 인증되지 않은 사용자가 관리자 페이지 접근 시 로그인 페이지로 리다이렉트된다")
     void admin_page_unauthorized() throws Exception {
-        // 컨트롤러가 있으므로 시큐리티가 정상 개입하여 302 리다이렉트 발생
         mockMvc.perform(getWithTenant("/admin/dashboard"))
                 .andDo(print())
                 .andExpect(status().is3xxRedirection())
@@ -164,7 +170,6 @@ class SecurityConfigIntegrationTest {
     @Test
     @DisplayName("[API] API 요청은 CSRF 검사를 하지 않는다")
     void api_csrf_disabled() throws Exception {
-        // 인증 없이 POST 요청 -> CSRF 토큰 없어도 403이 아닌 401(Unauthorized) 발생 확인
         mockMvc.perform(postWithTenant("/api/data")
                         .content("{\"data\":\"test\"}")
                         .contentType(MediaType.APPLICATION_JSON))

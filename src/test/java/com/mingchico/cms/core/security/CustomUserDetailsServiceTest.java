@@ -2,6 +2,7 @@ package com.mingchico.cms.core.security;
 
 import com.mingchico.cms.core.tenant.TenantContext;
 import com.mingchico.cms.core.tenant.domain.Tenant;
+import com.mingchico.cms.core.tenant.domain.TenantFeatures;
 import com.mingchico.cms.core.tenant.dto.TenantInfo; // [Import 추가]
 import com.mingchico.cms.core.user.domain.Membership;
 import com.mingchico.cms.core.user.domain.Role;
@@ -56,7 +57,7 @@ class CustomUserDetailsServiceTest {
 
         // [수정] setSiteCode(String) -> setContext(TenantInfo)로 변경
         // 테스트용 더미 TenantInfo 객체 생성 (ID 1L, 이름 "Test Site", 유지보수/읽기전용 false)
-        TenantInfo tenantInfo = new TenantInfo(1L, siteCode, "Test Site", "testThemeName", false, false);
+        TenantInfo tenantInfo = new TenantInfo(1L, siteCode, "Test Site", "testThemeName", false, false, new TenantFeatures());
         TenantContext.setContext(tenantInfo);
 
         User mockUser = User.builder()
@@ -109,7 +110,7 @@ class CustomUserDetailsServiceTest {
         String siteCode = "site-b";
 
         // [수정] setContext를 통해 TenantInfo 주입
-        TenantInfo tenantInfo = new TenantInfo(2L, siteCode, "Other Site", "testThemeName", false, false);
+        TenantInfo tenantInfo = new TenantInfo(2L, siteCode, "Other Site", "testThemeName", false, false, new TenantFeatures());
         TenantContext.setContext(tenantInfo);
 
         given(membershipRepository.findActiveMembership(anyString(), anyString()))

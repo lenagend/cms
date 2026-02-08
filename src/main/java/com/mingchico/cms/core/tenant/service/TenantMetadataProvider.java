@@ -1,6 +1,7 @@
 package com.mingchico.cms.core.tenant.service;
 
 import com.mingchico.cms.core.tenant.domain.Tenant;
+import com.mingchico.cms.core.tenant.domain.TenantFeatures;
 import com.mingchico.cms.core.tenant.dto.TenantInfo;
 import com.mingchico.cms.core.tenant.repository.TenantRepository;
 import lombok.RequiredArgsConstructor;
@@ -44,13 +45,20 @@ public class TenantMetadataProvider {
     }
 
     private TenantInfo mapToInfo(Tenant tenant) {
+        // DB에 JSON이 없거나 깨져있을 경우를 대비해 안전하게 처리
+        TenantFeatures safeFeatures = tenant.getFeatures();
+        if (safeFeatures == null) {
+            safeFeatures = new TenantFeatures(); // 기본값 로딩
+        }
+
         return new TenantInfo(
                 tenant.getId(),
                 tenant.getSiteCode(),
                 tenant.getName(),
                 tenant.getThemeName(),
                 tenant.isMaintenance(),
-                tenant.isReadOnly()
+                tenant.isReadOnly(),
+                safeFeatures
         );
     }
 }

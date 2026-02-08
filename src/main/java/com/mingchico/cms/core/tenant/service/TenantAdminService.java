@@ -4,11 +4,13 @@ import com.mingchico.cms.core.tenant.domain.Tenant;
 import com.mingchico.cms.core.tenant.dto.TenantDto;
 import com.mingchico.cms.core.tenant.event.TenantRouteChangedEvent;
 import com.mingchico.cms.core.tenant.repository.TenantRepository;
+import com.mingchico.cms.core.theme.ThemeProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -31,7 +33,8 @@ public class TenantAdminService {
 
     private final TenantRepository tenantRepository;
     private final TenantMetadataProvider tenantMetadataProvider; // 메타데이터 캐시 관리
-    private final ApplicationEventPublisher eventPublisher;      // [New] 이벤트 발행기
+    private final ApplicationEventPublisher eventPublisher;      // 이벤트 발행기
+    private final ThemeProperties themeProperties;
 
     public List<TenantDto.Response> getAllTenants() {
         return tenantRepository.findAll().stream()
@@ -43,11 +46,16 @@ public class TenantAdminService {
     public TenantDto.Response createTenant(TenantDto.CreateRequest request) {
         validateUniqueTenant(request);
 
+        String themeToCheck = StringUtils.hasText(request.themeName()) ? request.themeName() : "default";
+        validateThemeExists(themeToCheck);
+
         Tenant saved = tenantRepository.save(Tenant.builder()
                 .domainPattern(request.domainPattern())
                 .siteCode(request.siteCode())
                 .name(request.name())
                 .description(request.description())
+                .themeName(themeToCheck)
+                .features(request.features())
                 .build());
 
         log.info("New Tenant Created: {} -> {}", request.domainPattern(), request.siteCode());
@@ -63,9 +71,20 @@ public class TenantAdminService {
         Tenant tenant = tenantRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 테넌트 ID입니다."));
 
+        // [Safety] 테마 변경 시 검증
+        if (StringUtils.hasText(request.themeName())) {
+            validateThemeExists(request.themeName());
+        }
+
+        // 테넌트 정보 업데이트 (JSON Features 포함)
+        tenant.updateConfig(
+                request.themeName(),
+                request.features()
+        );
+
         tenant.update(request.name(), request.description(), request.themeName());
 
-        // [Cache] 이름/설명이 바뀌었으니 '메타데이터' 캐시만 삭제 (라우팅 갱신 불필요)
+        // [Cache Evict] 메타데이터 갱신
         tenantMetadataProvider.evictCache(tenant.getSiteCode());
 
         log.info("Tenant Updated: ID {}", id);
@@ -95,6 +114,16 @@ public class TenantAdminService {
         }
         if (tenantRepository.existsBySiteCode(request.siteCode())) {
             throw new IllegalArgumentException("이미 존재하는 사이트 코드입니다: " + request.siteCode());
+        }
+    }
+
+    /**
+     * [테마 검증 로직]
+     * yml 설정에 없는 테마 코드가 들어오면 예외를 발생시킵니다.
+     */
+    private void validateThemeExists(String themeCode) {
+        if (!themeProperties.isValidTheme(themeCode)) {
+            throw new IllegalArgumentException("지원하지 않는 테마 코드입니다: " + themeCode);
         }
     }
 }

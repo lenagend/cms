@@ -124,3 +124,17 @@ cms:
       admin-api-prefix: "/api/admin"
       api-prefix: "/api"
       admin-prefix: "/admin"
+  theme:
+    # 1. 시스템에서 지원하는 테마 목록 (관리자 화면 선택지용)
+    available-themes:
+      - code: "default"
+        display-name: "기본 기업형 (Corporate)"
+        description: "신뢰감을 주는 블루 톤의 정석적인 기업 홈페이지"
+
+      - code: "minimal"
+        display-name: "심플 포트폴리오 (Minimal)"
+        description: "이미지 위주의 갤러리/포트폴리오 타입"
+
+      - code: "admin-only"
+        display-name: "인트라넷 전용"
+        description: "외부 노출 없는 내부 관리 시스템"

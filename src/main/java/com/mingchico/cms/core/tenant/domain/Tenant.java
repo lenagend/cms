@@ -4,6 +4,8 @@ import com.mingchico.cms.core.common.BaseAuditEntity;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.Comment;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * <h3>[테넌트 (Tenant)]</h3>
@@ -37,12 +39,19 @@ public class Tenant extends BaseAuditEntity {
     @Column(nullable = false)
     private String name;
 
-    @Comment("설명")
-    private String description;
+    // --- [테마 & 기능 설정] ---
 
-    @Comment("적용된 테마 폴더명 (기존 templates/themes/{이름} 매핑)")
+    @Comment("적용된 테마 코드 (yml의 code와 매핑)")
     @Column(name = "theme_name", nullable = false, length = 50)
     private String themeName = "default";
+
+    @Comment("기능 활성화 설정 (JSON)")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "features", columnDefinition = "json")
+    private TenantFeatures features;
+
+    @Comment("설명")
+    private String description;
 
     @Comment("사이트 운영 상태 (정상, 점검중, 정지 등)")
     @Column(nullable = false)
@@ -59,12 +68,14 @@ public class Tenant extends BaseAuditEntity {
 
 
     @Builder
-    public Tenant(String siteCode, String domainPattern, String name, String description, String themeName) {
+    public Tenant(String siteCode, String domainPattern, String name, String description,
+                  String themeName, TenantFeatures features) {
         this.siteCode = siteCode;
         this.domainPattern = domainPattern;
         this.name = name;
         this.description = description;
         this.themeName = (themeName != null && !themeName.isBlank()) ? themeName : "default";
+        this.features = (features != null) ? features : new TenantFeatures();
     }
 
     public void update(String name, String description, String themeName) {
@@ -72,6 +83,16 @@ public class Tenant extends BaseAuditEntity {
         this.description = description;
         if (themeName != null && !themeName.isBlank()) {
             this.themeName = themeName;
+        }
+    }
+
+    // 관리자 화면에서 설정을 변경할 때 호출
+    public void updateConfig(String themeName, TenantFeatures features) {
+        if (themeName != null && !themeName.isBlank()) {
+            this.themeName = themeName; // [cite: 411]
+        }
+        if (features != null) {
+            this.features = features; // [cite: 412]
         }
     }
 
